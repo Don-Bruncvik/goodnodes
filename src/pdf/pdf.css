@@ -204,3 +204,5 @@
 }
 /* Keep dark swatches (black ink) visible on a dark toolbar. */
 .goodnodes-pdf-swatch::after { box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgba(127, 127, 127, 0.5)); }
+/* A resting or long-pressed pencil must not select text or open the iOS magnifier/callout. */
+.goodnodes-pdf-root { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }

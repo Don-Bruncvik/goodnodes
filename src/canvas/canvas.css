@@ -13,6 +13,7 @@
 	touch-action: none;
 	-webkit-user-select: none;
 	user-select: none;
+	-webkit-touch-callout: none;
 }
 .theme-dark .goodnodes-canvas-host { background: #1e1e1e; }
 .goodnodes-canvas-bg,

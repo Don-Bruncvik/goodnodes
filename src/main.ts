@@ -19,13 +19,7 @@ export default class GoodNodesPlugin extends Plugin {
 		this.registerView(CANVAS_VIEW_TYPE, (leaf) => new CanvasView(leaf, this));
 		this.registerExtensions([CANVAS_EXTENSION], CANVAS_VIEW_TYPE);
 		this.registerView(PDF_VIEW_TYPE, (leaf) => new PdfNotebookView(leaf, this));
-		if (this.settings.openPdfByDefault) {
-			try {
-				this.registerExtensions(["pdf"], PDF_VIEW_TYPE);
-			} catch (e) {
-				debug.error("could not take over .pdf files", e);
-			}
-		}
+		if (this.settings.openPdfByDefault) this.takeOverPdf();
 
 		this.addRibbonIcon("pencil", "New GoodNodes canvas", () => void this.createCanvas());
 		this.addRibbonIcon("book-open", "Open PDF as GoodNodes notebook", () => new PdfPickerModal(this).open());
@@ -41,6 +35,14 @@ export default class GoodNodesPlugin extends Plugin {
 					menu.addItem((item) =>
 						item.setTitle("Open as GoodNodes notebook").setIcon("book-open").onClick(() => void this.openPdf(file)),
 					);
+					if (this.settings.openPdfByDefault) {
+						menu.addItem((item) =>
+							item
+								.setTitle("Open in Obsidian's PDF viewer")
+								.setIcon("file-text")
+								.onClick(() => void this.app.workspace.getLeaf(true).setViewState({ type: "pdf", state: { file: file.path }, active: true })),
+						);
+					}
 				}
 			}),
 		);
@@ -50,6 +52,35 @@ export default class GoodNodesPlugin extends Plugin {
 		this.debugPanel.close();
 		window.removeEventListener("error", this.onWindowError);
 		window.removeEventListener("unhandledrejection", this.onUnhandledRejection);
+	}
+
+	/**
+	 * Make tapping a PDF open it in GoodNodes. Obsidian's own PDF view already owns the
+	 * extension, so release it first (internal API) and hand it back on unload.
+	 */
+	private takeOverPdf(): void {
+		const registry = (this.app as unknown as { viewRegistry?: ViewRegistry }).viewRegistry;
+		if (!registry?.registerExtensions || !registry.unregisterExtensions) {
+			debug.log("cannot take over .pdf files: view registry API not available", "warn");
+			return;
+		}
+		const previous = registry.typeByExtension?.pdf;
+		try {
+			// Not this.registerExtensions: its automatic cleanup would also remove the
+			// registration we restore for Obsidian below.
+			if (previous) registry.unregisterExtensions(["pdf"]);
+			registry.registerExtensions(["pdf"], PDF_VIEW_TYPE);
+		} catch (e) {
+			debug.error("could not take over .pdf files", e);
+		}
+		this.register(() => {
+			try {
+				if (registry.typeByExtension?.pdf === PDF_VIEW_TYPE) registry.unregisterExtensions?.(["pdf"]);
+				if (previous && !registry.typeByExtension?.pdf) registry.registerExtensions?.(["pdf"], previous);
+			} catch (e) {
+				debug.error("could not give .pdf back to Obsidian", e);
+			}
+		});
 	}
 
 	async saveSettings(): Promise<void> {
@@ -85,6 +116,12 @@ export default class GoodNodesPlugin extends Plugin {
 		const leaf = this.app.workspace.getLeaf(true);
 		await leaf.setViewState({ type: PDF_VIEW_TYPE, state: { file: file.path }, active: true });
 	}
+}
+
+interface ViewRegistry {
+	typeByExtension?: Record<string, string>;
+	registerExtensions?(extensions: string[], viewType: string): void;
+	unregisterExtensions?(extensions: string[]): void;
 }
 
 class PdfPickerModal extends FuzzySuggestModal<TFile> {
