@@ -202,3 +202,5 @@
 @container (min-width: 821px) {
 	.goodnodes-pdf-root.has-thumbnails .goodnodes-pdf-scroll { left: 188px; }
 }
+/* Keep dark swatches (black ink) visible on a dark toolbar. */
+.goodnodes-pdf-swatch::after { box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgba(127, 127, 127, 0.5)); }

@@ -150,6 +150,8 @@ export class PdfNotebookView extends FileView {
 			// pdf.js transfers (detaches) `data` to its worker, so take the size from the file.
 			await this.loadSidecar(file, file.stat.size);
 			this.buildSlots();
+			// Refit once the page list exists: a vertical scrollbar may have taken some width.
+			requestAnimationFrame(() => this.onResize());
 			this.observe();
 			this.restorePage(this.currentPage);
 			this.scheduleUpdate();
