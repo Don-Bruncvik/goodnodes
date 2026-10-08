@@ -29,18 +29,29 @@ export default class GoodNodesPlugin extends Plugin {
 			this.app.workspace.on("file-menu", (menu, file) => {
 				if (file instanceof TFolder) {
 					menu.addItem((item) =>
-						item.setTitle("New GoodNodes canvas").setIcon("pencil").onClick(() => void this.createCanvas(file)),
+						item
+							.setTitle("New GoodNodes canvas")
+							.setIcon("pencil")
+							.onClick(() => void this.createCanvas(file)),
 					);
 				} else if (file instanceof TFile && file.extension === "pdf") {
 					menu.addItem((item) =>
-						item.setTitle("Open as GoodNodes notebook").setIcon("book-open").onClick(() => void this.openPdf(file)),
+						item
+							.setTitle("Open as GoodNodes notebook")
+							.setIcon("book-open")
+							.onClick(() => void this.openPdf(file)),
 					);
 					if (this.settings.openPdfByDefault) {
 						menu.addItem((item) =>
 							item
 								.setTitle("Open in Obsidian's PDF viewer")
 								.setIcon("file-text")
-								.onClick(() => void this.app.workspace.getLeaf(true).setViewState({ type: "pdf", state: { file: file.path }, active: true })),
+								.onClick(
+									() =>
+										void this.app.workspace
+											.getLeaf(true)
+											.setViewState({ type: "pdf", state: { file: file.path }, active: true }),
+								),
 						);
 					}
 				}

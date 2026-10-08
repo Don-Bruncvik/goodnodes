@@ -21,10 +21,33 @@
 	padding: 4px 8px;
 	border-bottom: 1px solid #444;
 }
-.goodnodes-debug-bar span { flex: 1; font-weight: 600; }
-.goodnodes-debug-bar button { padding: 2px 8px; height: auto; font-size: 11px; }
-.goodnodes-debug-live { white-space: pre; padding: 4px 8px; color: #8fd; border-bottom: 1px solid #444; overflow-x: auto; }
-.goodnodes-debug-log { overflow-y: auto; padding: 4px 8px; white-space: pre-wrap; }
-.goodnodes-debug-error { color: #f88; }
-.goodnodes-debug-warn { color: #fd8; }
-.goodnodes-debug-event { color: #aaa; }
+.goodnodes-debug-bar span {
+	flex: 1;
+	font-weight: 600;
+}
+.goodnodes-debug-bar button {
+	padding: 2px 8px;
+	height: auto;
+	font-size: 11px;
+}
+.goodnodes-debug-live {
+	white-space: pre;
+	padding: 4px 8px;
+	color: #8fd;
+	border-bottom: 1px solid #444;
+	overflow-x: auto;
+}
+.goodnodes-debug-log {
+	overflow-y: auto;
+	padding: 4px 8px;
+	white-space: pre-wrap;
+}
+.goodnodes-debug-error {
+	color: #f88;
+}
+.goodnodes-debug-warn {
+	color: #fd8;
+}
+.goodnodes-debug-event {
+	color: #aaa;
+}

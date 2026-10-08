@@ -25,7 +25,10 @@ interface CanvasFile {
 	version: 1;
 	background: BackgroundSettings;
 	viewport: Viewport;
-	scene: { elements?: unknown[]; appState?: Record<string, unknown>; files?: Record<string, StoredFile> } & Record<string, unknown>;
+	scene: { elements?: unknown[]; appState?: Record<string, unknown>; files?: Record<string, StoredFile> } & Record<
+		string,
+		unknown
+	>;
 }
 
 export function emptyCanvasFile(): string {
@@ -133,7 +136,13 @@ export class CanvasView extends TextFileView {
 		const elements = this.api.getSceneElementsIncludingDeleted();
 		const scene = JSON.parse(serializeAsJSON(elements, this.api.getAppState(), this.api.getFiles(), "local"));
 		scene.files = this.images.toStored(scene.files);
-		const file: CanvasFile = { type: "goodnodes", version: 1, background: this.background, viewport: this.viewport, scene };
+		const file: CanvasFile = {
+			type: "goodnodes",
+			version: 1,
+			background: this.background,
+			viewport: this.viewport,
+			scene,
+		};
 		const data = JSON.stringify(file);
 		this.lastData = data;
 		this.savedVersion = this.currentVersion();
@@ -232,7 +241,9 @@ export class CanvasView extends TextFileView {
 		api.updateScene({ elements: restored.elements, captureUpdate: CaptureUpdateAction.NEVER });
 		const embedded = Object.values(restored.files);
 		if (embedded.length) api.addFiles(embedded);
-		void this.images.load(file.scene.files).then((files) => files.length && this.api === api && api.addFiles(files));
+		void this.images
+			.load(file.scene.files)
+			.then((files) => files.length && this.api === api && api.addFiles(files));
 		requestAnimationFrame(() => {
 			this.savedVersion = this.currentVersion();
 			this.loading = false;
@@ -340,7 +351,10 @@ export class CanvasView extends TextFileView {
 	private applyTheme(): void {
 		const dark = this.isDark();
 		this.bg?.setDark(dark);
-		this.api?.updateScene({ appState: { theme: dark ? "dark" : "light" }, captureUpdate: CaptureUpdateAction.NEVER });
+		this.api?.updateScene({
+			appState: { theme: dark ? "dark" : "light" },
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
 	}
 }
 
@@ -365,7 +379,9 @@ function BackgroundIcon({ kind }: { kind: BackgroundKind }) {
 			{kind === "grid" && <path d="M7.5 2.5v15M12.5 2.5v15M2.5 7.5h15M2.5 12.5h15" strokeWidth="1" />}
 			{kind === "dots" &&
 				[6.5, 10, 13.5].flatMap((x) =>
-					[6.5, 10, 13.5].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="0.9" fill="currentColor" stroke="none" />),
+					[6.5, 10, 13.5].map((y) => (
+						<circle key={`${x}-${y}`} cx={x} cy={y} r="0.9" fill="currentColor" stroke="none" />
+					)),
 				)}
 		</svg>
 	);

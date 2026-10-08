@@ -20,10 +20,32 @@ function rotationInfo(slot: PageSlot): { width: number; height: number; rotation
 	return { width: slot.unrotatedWidth, height: slot.unrotatedHeight, rotation: slot.rotation };
 }
 
-type PageSlot = { el: HTMLElement; width: number; height: number; unrotatedWidth: number; unrotatedHeight: number; rotation: number; canvas?: HTMLCanvasElement; ink?: HTMLCanvasElement; live?: HTMLCanvasElement; task?: any; page?: PdfPage; busy?: boolean };
+type PageSlot = {
+	el: HTMLElement;
+	width: number;
+	height: number;
+	unrotatedWidth: number;
+	unrotatedHeight: number;
+	rotation: number;
+	canvas?: HTMLCanvasElement;
+	ink?: HTMLCanvasElement;
+	live?: HTMLCanvasElement;
+	task?: any;
+	page?: PdfPage;
+	busy?: boolean;
+};
 type Tool = InkTool | "eraser";
 type ZoomAnchor = { page: number; x: number; y: number };
-type Gesture = { distance: number; zoom: number; originX: number; originY: number; centerX: number; centerY: number; anchor: ZoomAnchor; visualScale: number };
+type Gesture = {
+	distance: number;
+	zoom: number;
+	originX: number;
+	originY: number;
+	centerX: number;
+	centerY: number;
+	anchor: ZoomAnchor;
+	visualScale: number;
+};
 type SessionTool = { tool: Tool; color: string; width: number };
 const PRESET_COLORS = ["#1e1e1e", "#1971c2", "#e03131", "#2f9e44", "#f08c00", "#9c36b5"];
 let sessionTool: SessionTool | null = null;
@@ -83,7 +105,11 @@ export class PdfNotebookView extends FileView {
 	constructor(leaf: WorkspaceLeaf, plugin: GoodNodesPlugin) {
 		super(leaf);
 		this.plugin = plugin;
-		this.toolState = sessionTool ?? { tool: "pen", color: plugin.settings.penColor, width: plugin.settings.penWidth };
+		this.toolState = sessionTool ?? {
+			tool: "pen",
+			color: plugin.settings.penColor,
+			width: plugin.settings.penWidth,
+		};
 		this.contentEl.addClass("goodnodes-pdf-root");
 		this.scroller = this.contentEl.createDiv({ cls: "goodnodes-pdf-scroll" });
 		this.pagesEl = this.scroller.createDiv({ cls: "goodnodes-pdf-pages" });
@@ -100,12 +126,17 @@ export class PdfNotebookView extends FileView {
 			debug.log("pdf pointercancel (device diagnostic)", "warn");
 			this.pointerUp(event);
 		});
-		this.registerDomEvent(this.pagesEl, "wheel", (e) => {
-			if ((e.ctrlKey || e.metaKey) && e.deltaY) {
-				e.preventDefault();
-				this.setZoom(this.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08), e.clientX, e.clientY);
-			}
-		}, { passive: false });
+		this.registerDomEvent(
+			this.pagesEl,
+			"wheel",
+			(e) => {
+				if ((e.ctrlKey || e.metaKey) && e.deltaY) {
+					e.preventDefault();
+					this.setZoom(this.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08), e.clientX, e.clientY);
+				}
+			},
+			{ passive: false },
+		);
 		this.registerDomEvent(this.contentEl, "keydown", (e) => this.handleKeydown(e));
 		this.contentEl.tabIndex = 0;
 		this.scroller.addEventListener("touchstart", this.touchStart, { passive: false });
@@ -114,9 +145,11 @@ export class PdfNotebookView extends FileView {
 		for (const type of ["touchstart", "touchmove", "touchend"] as const) {
 			this.registerDomEvent(this.scroller, type, (e: TouchEvent) => e.stopPropagation(), { passive: true });
 		}
-		this.registerEvent((this.app.vault as any).on("raw", (path: string) => {
-			if (path === this.sidecarPath) void this.readExternalSidecar();
-		}));
+		this.registerEvent(
+			(this.app.vault as any).on("raw", (path: string) => {
+				if (path === this.sidecarPath) void this.readExternalSidecar();
+			}),
+		);
 	}
 
 	getViewType(): string {
@@ -194,15 +227,28 @@ export class PdfNotebookView extends FileView {
 		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
 		this.renderColorSwatches();
 		for (const width of [1, this.plugin.settings.penWidth, this.plugin.settings.penWidth * 2.5]) {
-			const button = this.toolbar.createEl("button", { cls: "goodnodes-pdf-width", attr: { title: `Width ${width}` } });
+			const button = this.toolbar.createEl("button", {
+				cls: "goodnodes-pdf-width",
+				attr: { title: `Width ${width}` },
+			});
 			button.dataset.width = String(width);
 			button.createSpan({ cls: "goodnodes-pdf-width-dot" }).style.width = `${Math.min(18, 4 + width * 2)}px`;
 			button.createSpan({ cls: "goodnodes-pdf-width-dot" }).style.height = `${Math.min(18, 4 + width * 2)}px`;
-			button.onclick = () => { this.toolState.width = width; this.updateToolbar(); this.rememberTool(); };
+			button.onclick = () => {
+				this.toolState.width = width;
+				this.updateToolbar();
+				this.rememberTool();
+			};
 		}
 		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
 		// Zoom buttons are for mouse users; on narrow (touch) layouts CSS hides them, pinch is there.
-		this.iconButton(this.toolbar, "zoom-out", "Zoom out", () => this.setZoom(this.zoom / 1.2), "goodnodes-pdf-zoom");
+		this.iconButton(
+			this.toolbar,
+			"zoom-out",
+			"Zoom out",
+			() => this.setZoom(this.zoom / 1.2),
+			"goodnodes-pdf-zoom",
+		);
 		this.iconButton(this.toolbar, "zoom-in", "Zoom in", () => this.setZoom(this.zoom * 1.2), "goodnodes-pdf-zoom");
 		this.iconButton(this.toolbar, "maximize", "Fit width", () => this.setZoom(1));
 		this.iconButton(this.toolbar, "list", "Outline", () => this.toggleOutline());
@@ -212,20 +258,35 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private renderColorSwatches(): void {
-		const settingColor = this.toolState.tool === "highlighter" ? this.plugin.settings.highlighterColor : this.plugin.settings.penColor;
+		const settingColor =
+			this.toolState.tool === "highlighter"
+				? this.plugin.settings.highlighterColor
+				: this.plugin.settings.penColor;
 		const colors = [...new Set([settingColor.toLowerCase(), ...PRESET_COLORS])];
 		for (const color of colors) {
 			const button = this.toolbar.createEl("button", { cls: "goodnodes-pdf-swatch", attr: { title: color } });
 			button.style.setProperty("--goodnodes-swatch", color);
-			button.onclick = () => { this.toolState.color = color; this.updateToolbar(); this.rememberTool(); };
+			button.onclick = () => {
+				this.toolState.color = color;
+				this.updateToolbar();
+				this.rememberTool();
+			};
 		}
 	}
 
 	private toolButton(tool: Tool, icon: string, label: string): void {
-		const button = this.toolbar.createEl("button", { cls: "goodnodes-pdf-tool", attr: { "aria-label": label, title: label } });
+		const button = this.toolbar.createEl("button", {
+			cls: "goodnodes-pdf-tool",
+			attr: { "aria-label": label, title: label },
+		});
 		setIcon(button, icon);
 		button.dataset.tool = tool;
-		button.onclick = () => { this.toolState.tool = tool; if (tool === "highlighter") this.toolState.color = this.plugin.settings.highlighterColor; this.updateToolbar(); this.rememberTool(); };
+		button.onclick = () => {
+			this.toolState.tool = tool;
+			if (tool === "highlighter") this.toolState.color = this.plugin.settings.highlighterColor;
+			this.updateToolbar();
+			this.rememberTool();
+		};
 	}
 
 	private iconButton(parent: HTMLElement, icon: string, title: string, action: () => void, cls?: string): void {
@@ -235,9 +296,19 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private updateToolbar(): void {
-		this.toolbar.querySelectorAll<HTMLElement>("[data-tool]").forEach((button) => button.toggleClass("is-active", button.dataset.tool === this.toolState.tool));
-		this.toolbar.querySelectorAll<HTMLElement>(".goodnodes-pdf-swatch").forEach((button) => button.toggleClass("is-active", button.title.toLowerCase() === this.toolState.color.toLowerCase()));
-		this.toolbar.querySelectorAll<HTMLElement>(".goodnodes-pdf-width").forEach((button) => button.toggleClass("is-active", Number(button.dataset.width) === this.toolState.width));
+		this.toolbar
+			.querySelectorAll<HTMLElement>("[data-tool]")
+			.forEach((button) => button.toggleClass("is-active", button.dataset.tool === this.toolState.tool));
+		this.toolbar
+			.querySelectorAll<HTMLElement>(".goodnodes-pdf-swatch")
+			.forEach((button) =>
+				button.toggleClass("is-active", button.title.toLowerCase() === this.toolState.color.toLowerCase()),
+			);
+		this.toolbar
+			.querySelectorAll<HTMLElement>(".goodnodes-pdf-width")
+			.forEach((button) =>
+				button.toggleClass("is-active", Number(button.dataset.width) === this.toolState.width),
+			);
 	}
 
 	private rememberTool(): void {
@@ -259,35 +330,52 @@ export class PdfNotebookView extends FileView {
 			el.dataset.page = String(i);
 			el.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
 			el.style.height = `${this.baseHeight * this.pageScale * this.zoom}px`;
-			this.slots.push({ el, width: this.baseWidth, height: this.baseHeight, unrotatedWidth: this.baseWidth, unrotatedHeight: this.baseHeight, rotation: 0 });
+			this.slots.push({
+				el,
+				width: this.baseWidth,
+				height: this.baseHeight,
+				unrotatedWidth: this.baseWidth,
+				unrotatedHeight: this.baseHeight,
+				rotation: 0,
+			});
 		}
 	}
 
 	private observe(): void {
 		this.observer?.disconnect();
-		this.observer = new IntersectionObserver((entries) => {
-			for (const entry of entries) {
-				const page = Number((entry.target as HTMLElement).dataset.page);
-				if (entry.isIntersecting) this.visible.add(page);
-				else this.visible.delete(page);
-			}
-			this.scheduleUpdate();
-		}, { root: this.scroller, rootMargin: `${Math.max(500, this.scroller.clientHeight)}px 0px` });
+		this.observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					const page = Number((entry.target as HTMLElement).dataset.page);
+					if (entry.isIntersecting) this.visible.add(page);
+					else this.visible.delete(page);
+				}
+				this.scheduleUpdate();
+			},
+			{ root: this.scroller, rootMargin: `${Math.max(500, this.scroller.clientHeight)}px 0px` },
+		);
 		for (const slot of this.slots) this.observer.observe(slot.el);
 	}
 
 	private scheduleUpdate(): void {
 		if (this.raf) return;
-		this.raf = requestAnimationFrame(() => { this.raf = 0; this.updateVisible(); });
+		this.raf = requestAnimationFrame(() => {
+			this.raf = 0;
+			this.updateVisible();
+		});
 	}
 
 	private updateVisible(): void {
 		if (!this.doc || !this.slots.length) return;
 		const center = this.scroller.scrollTop + this.scroller.clientHeight / 2;
-		let current = 0, best = Infinity;
+		let current = 0,
+			best = Infinity;
 		this.slots.forEach((slot, i) => {
 			const distance = Math.abs(slot.el.offsetTop + slot.el.offsetHeight / 2 - center);
-			if (distance < best) { best = distance; current = i; }
+			if (distance < best) {
+				best = distance;
+				current = i;
+			}
 		});
 		if (this.currentPage !== current) this.markDirty();
 		this.currentPage = current;
@@ -312,7 +400,11 @@ export class PdfNotebookView extends FileView {
 			if (!this.visible.has(index) || this.slots[index].canvas || this.slots[index].busy) continue;
 			this.running++;
 			this.slots[index].busy = true;
-			void this.renderPage(index).finally(() => { this.running--; this.slots[index].busy = false; this.pump(); });
+			void this.renderPage(index).finally(() => {
+				this.running--;
+				this.slots[index].busy = false;
+				this.pump();
+			});
 		}
 	}
 
@@ -321,7 +413,7 @@ export class PdfNotebookView extends FileView {
 		const started = performance.now();
 		let canvas: HTMLCanvasElement | undefined;
 		try {
-			const page = this.loaded.get(index) ?? await this.doc.getPage(index + 1);
+			const page = this.loaded.get(index) ?? (await this.doc.getPage(index + 1));
 			this.loaded.set(index, page);
 			const raw = page.getViewport({ scale: 1 });
 			const unrotated = page.getViewport({ scale: 1, rotation: 0 });
@@ -331,7 +423,8 @@ export class PdfNotebookView extends FileView {
 			if (Math.abs(raw.width - this.baseWidth) > 1 || Math.abs(raw.height - this.baseHeight) > 1) {
 				const anchor = this.topAnchor();
 				const slot = this.slots[index];
-				slot.width = raw.width; slot.height = raw.height;
+				slot.width = raw.width;
+				slot.height = raw.height;
 				slot.el.style.width = `${raw.width * this.pageScale * this.zoom}px`;
 				slot.el.style.height = `${raw.height * this.pageScale * this.zoom}px`;
 				this.restoreAnchor(anchor);
@@ -340,29 +433,52 @@ export class PdfNotebookView extends FileView {
 			const viewport = page.getViewport({ scale });
 			const dpr = Math.max(1, window.devicePixelRatio || 1);
 			const pixelScale = Math.min(dpr, Math.sqrt(4_000_000 / (viewport.width * viewport.height)));
-			canvas = document.createElement("canvas"); canvas.className = "goodnodes-pdf-canvas";
-			canvas.width = Math.max(1, Math.floor(viewport.width * pixelScale)); canvas.height = Math.max(1, Math.floor(viewport.height * pixelScale));
-			canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`;
+			canvas = document.createElement("canvas");
+			canvas.className = "goodnodes-pdf-canvas";
+			canvas.width = Math.max(1, Math.floor(viewport.width * pixelScale));
+			canvas.height = Math.max(1, Math.floor(viewport.height * pixelScale));
+			canvas.style.width = `${viewport.width}px`;
+			canvas.style.height = `${viewport.height}px`;
 			const ctx = canvas.getContext("2d", { alpha: false })!;
-			const task = page.render({ canvasContext: ctx, viewport: pixelScale === 1 ? viewport : page.getViewport({ scale: scale * pixelScale }) });
+			const task = page.render({
+				canvasContext: ctx,
+				viewport: pixelScale === 1 ? viewport : page.getViewport({ scale: scale * pixelScale }),
+			});
 			this.slots[index].task = task;
 			this.slots[index].el.appendChild(canvas);
 			await task.promise;
-			if (this.disposed || !this.visible.has(index)) { canvas.width = canvas.height = 0; canvas.remove(); return; }
+			if (this.disposed || !this.visible.has(index)) {
+				canvas.width = canvas.height = 0;
+				canvas.remove();
+				return;
+			}
 			const ink = this.makeOverlay(canvas, "goodnodes-pdf-ink");
 			const live = this.makeOverlay(canvas, "goodnodes-pdf-live");
 			live.width = live.height = 0;
 			this.slots[index].el.append(ink, live);
-			this.slots[index].canvas = canvas; this.slots[index].ink = ink; this.slots[index].live = live;
-			this.slots[index].page = page; this.slots[index].task = undefined;
+			this.slots[index].canvas = canvas;
+			this.slots[index].ink = ink;
+			this.slots[index].live = live;
+			this.slots[index].page = page;
+			this.slots[index].task = undefined;
 			this.drawCommittedInk(index);
 			this.logCanvasStats();
 			const jump = this.jumpStarted.get(index);
-			if (jump) { debug.log(`Jump page ${index + 1} to first render ${(performance.now() - jump).toFixed(1)} ms`); this.jumpStarted.delete(index); }
-			if (index === 0) debug.log(`First PDF page rendered ${(performance.now() - this.loadStartedAt).toFixed(1)} ms total (${(performance.now() - started).toFixed(1)} ms render)`);
+			if (jump) {
+				debug.log(`Jump page ${index + 1} to first render ${(performance.now() - jump).toFixed(1)} ms`);
+				this.jumpStarted.delete(index);
+			}
+			if (index === 0)
+				debug.log(
+					`First PDF page rendered ${(performance.now() - this.loadStartedAt).toFixed(1)} ms total (${(performance.now() - started).toFixed(1)} ms render)`,
+				);
 		} catch (err) {
-			if (canvas) { canvas.width = canvas.height = 0; canvas.remove(); }
-			if ((err as Error)?.name !== "RenderingCancelledException") debug.error(`PDF page ${index + 1} render failed`, err);
+			if (canvas) {
+				canvas.width = canvas.height = 0;
+				canvas.remove();
+			}
+			if ((err as Error)?.name !== "RenderingCancelledException")
+				debug.error(`PDF page ${index + 1} render failed`, err);
 		}
 	}
 
@@ -374,17 +490,23 @@ export class PdfNotebookView extends FileView {
 		const scale = 1;
 		canvas.width = Math.max(1, Math.floor(base.width * scale));
 		canvas.height = Math.max(1, Math.floor(base.height * scale));
-		canvas.style.width = base.style.width; canvas.style.height = base.style.height;
+		canvas.style.width = base.style.width;
+		canvas.style.height = base.style.height;
 		return canvas;
 	}
 
 	private release(index: number): void {
 		const slot = this.slots[index];
 		if (!slot) return;
-		slot.task?.cancel?.(); slot.task = undefined;
+		slot.task?.cancel?.();
+		slot.task = undefined;
 		for (const key of ["canvas", "ink", "live"] as const) {
 			const canvas = slot[key];
-			if (canvas) { canvas.width = canvas.height = 0; canvas.remove(); slot[key] = undefined; }
+			if (canvas) {
+				canvas.width = canvas.height = 0;
+				canvas.remove();
+				slot[key] = undefined;
+			}
 		}
 		(slot.page ?? this.loaded.get(index))?.cleanup?.();
 		this.loaded.delete(index);
@@ -393,8 +515,13 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private logCanvasStats(): void {
-		let count = 0, pixels = 0;
-		for (const slot of this.slots) if (slot.canvas) { count++; pixels += slot.canvas.width * slot.canvas.height; }
+		let count = 0,
+			pixels = 0;
+		for (const slot of this.slots)
+			if (slot.canvas) {
+				count++;
+				pixels += slot.canvas.width * slot.canvas.height;
+			}
 		debug.live.pdf = `${count} live page canvases · ${(pixels / 1_000_000).toFixed(1)} MP`;
 	}
 
@@ -467,9 +594,15 @@ export class PdfNotebookView extends FileView {
 		debug.pointer("pdf", event);
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
 		if (event.pointerType === "touch") {
-			if (this.penDown || Date.now() < this.penUntil) { this.ignoredTouches.add(event.pointerId); return; }
+			if (this.penDown || Date.now() < this.penUntil) {
+				this.ignoredTouches.add(event.pointerId);
+				return;
+			}
 			const maxTouchSize = this.plugin.settings.palmMaxTouchSize;
-			if (maxTouchSize > 0 && Math.max(event.width, event.height) > maxTouchSize) { this.ignoredTouches.add(event.pointerId); return; }
+			if (maxTouchSize > 0 && Math.max(event.width, event.height) > maxTouchSize) {
+				this.ignoredTouches.add(event.pointerId);
+				return;
+			}
 			this.pointers.set(event.pointerId, event);
 			if (this.touchPointerCount() >= 2) this.startPinch();
 			return;
@@ -480,7 +613,11 @@ export class PdfNotebookView extends FileView {
 		const hit = this.pageAt(event);
 		if (!hit) return;
 		this.activeStroke = { pointerId: event.pointerId, page: hit[0], points: [hit[1]], tool: this.toolState.tool };
-		try { (event.target as HTMLElement).setPointerCapture(event.pointerId); } catch { /* The page may unload mid-gesture. */ }
+		try {
+			(event.target as HTMLElement).setPointerCapture(event.pointerId);
+		} catch {
+			/* The page may unload mid-gesture. */
+		}
 		event.preventDefault();
 		this.drawLive(this.activeStroke.page);
 	}
@@ -523,28 +660,52 @@ export class PdfNotebookView extends FileView {
 	private pageAt(event: PointerEvent): [number, InkPoint] | null {
 		const pageEl = (event.target as HTMLElement).closest<HTMLElement>(".goodnodes-pdf-page");
 		if (!pageEl) return null;
-		const page = Number(pageEl.dataset.page), rect = pageEl.getBoundingClientRect();
+		const page = Number(pageEl.dataset.page),
+			rect = pageEl.getBoundingClientRect();
 		const scale = this.pageScale * this.zoom;
 		const slot = this.slots[page];
-		const screenX = (event.clientX - rect.left) / scale, screenY = (event.clientY - rect.top) / scale;
-		const [x, y] = displayedToUnrotated(screenX, screenY, { width: slot.unrotatedWidth, height: slot.unrotatedHeight, rotation: slot.rotation });
+		const screenX = (event.clientX - rect.left) / scale,
+			screenY = (event.clientY - rect.top) / scale;
+		const [x, y] = displayedToUnrotated(screenX, screenY, {
+			width: slot.unrotatedWidth,
+			height: slot.unrotatedHeight,
+			rotation: slot.rotation,
+		});
 		return [page, [round(x), round(y), round(event.pressure || 0.5)]];
 	}
 
 	private commitInk(page: number, points: InkPoint[], tool: InkTool): void {
 		if (!points.length) return;
-		const stroke: InkStroke = { id: newStrokeId(), tool, color: this.toolState.color, width: this.toolState.width, points };
+		const stroke: InkStroke = {
+			id: newStrokeId(),
+			tool,
+			color: this.toolState.color,
+			width: this.toolState.width,
+			points,
+		};
 		const existing = this.strokes.get(page) ?? [];
 		if (tool === "pen" && this.plugin.settings.scratchEnabled) {
-			const candidates = existing.map((item) => ({ id: item.id, points: item.points.map(([x, y]) => ({ x, y })) }));
-			const ids = findScratchedStrokes(points.map(([x, y]) => ({ x, y })), candidates, {
-				minReversals: this.plugin.settings.scratchMinReversals,
-				coverage: this.plugin.settings.scratchCoverage,
-			});
-			debug.log(`PDF scratch page ${page + 1}: candidates=${candidates.length} removed=${ids.join(",") || "none"}`);
+			const candidates = existing.map((item) => ({
+				id: item.id,
+				points: item.points.map(([x, y]) => ({ x, y })),
+			}));
+			const ids = findScratchedStrokes(
+				points.map(([x, y]) => ({ x, y })),
+				candidates,
+				{
+					minReversals: this.plugin.settings.scratchMinReversals,
+					coverage: this.plugin.settings.scratchCoverage,
+				},
+			);
+			debug.log(
+				`PDF scratch page ${page + 1}: candidates=${candidates.length} removed=${ids.join(",") || "none"}`,
+			);
 			if (ids.length) {
 				const removed = existing.filter((item) => ids.includes(item.id));
-				this.strokes.set(page, existing.filter((item) => !ids.includes(item.id)));
+				this.strokes.set(
+					page,
+					existing.filter((item) => !ids.includes(item.id)),
+				);
 				this.history.push({ page, added: [], removed });
 				this.changed(page);
 				return;
@@ -560,7 +721,10 @@ export class PdfNotebookView extends FileView {
 		const ids = new Set(findEraserHits(points, existing, 8 / (this.pageScale * this.zoom)));
 		if (!ids.size) return;
 		const removed = existing.filter((stroke) => ids.has(stroke.id));
-		this.strokes.set(page, existing.filter((stroke) => !ids.has(stroke.id)));
+		this.strokes.set(
+			page,
+			existing.filter((stroke) => !ids.has(stroke.id)),
+		);
 		this.history.push({ page, added: [], removed });
 		this.changed(page);
 	}
@@ -598,11 +762,20 @@ export class PdfNotebookView extends FileView {
 			// canvas pixels per CSS pixel; page units → CSS pixels is `scale`.
 			const factor = canvas.width / (slot.width * scale);
 			const [displayX, displayY] = unrotatedToDisplayed(last[0], last[1], rotationInfo(slot));
-			ctx.beginPath(); ctx.arc(displayX * scale * factor, displayY * scale * factor, 8 * factor, 0, Math.PI * 2);
-			ctx.strokeStyle = "rgba(30,30,30,.65)"; ctx.lineWidth = 1.5 * factor; ctx.stroke();
+			ctx.beginPath();
+			ctx.arc(displayX * scale * factor, displayY * scale * factor, 8 * factor, 0, Math.PI * 2);
+			ctx.strokeStyle = "rgba(30,30,30,.65)";
+			ctx.lineWidth = 1.5 * factor;
+			ctx.stroke();
 			return;
 		}
-		const stroke: InkStroke = { id: "live", tool: this.activeStroke.tool, color: this.toolState.color, width: this.toolState.width, points: this.activeStroke.points };
+		const stroke: InkStroke = {
+			id: "live",
+			tool: this.activeStroke.tool,
+			color: this.toolState.color,
+			width: this.toolState.width,
+			points: this.activeStroke.points,
+		};
 		this.paintStroke(ctx, stroke, canvas);
 	}
 
@@ -617,16 +790,32 @@ export class PdfNotebookView extends FileView {
 		});
 		const width = stroke.width * scale * factor;
 		if (stroke.tool === "highlighter") {
-			ctx.save(); ctx.globalCompositeOperation = "multiply"; ctx.globalAlpha = 0.35;
-			ctx.strokeStyle = stroke.color; ctx.lineWidth = Math.max(1, width * 5); ctx.lineCap = "butt"; ctx.lineJoin = "bevel";
-			ctx.beginPath(); points.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); ctx.restore();
+			ctx.save();
+			ctx.globalCompositeOperation = "multiply";
+			ctx.globalAlpha = 0.35;
+			ctx.strokeStyle = stroke.color;
+			ctx.lineWidth = Math.max(1, width * 5);
+			ctx.lineCap = "butt";
+			ctx.lineJoin = "bevel";
+			ctx.beginPath();
+			points.forEach(([x, y], index) => (index ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+			ctx.stroke();
+			ctx.restore();
 			return;
 		}
-		const outline = getStroke(points, { size: width, thinning: 0.6, smoothing: smooth ? 0.5 : 0, streamline: smooth ? 0.5 : 0 });
+		const outline = getStroke(points, {
+			size: width,
+			thinning: 0.6,
+			smoothing: smooth ? 0.5 : 0,
+			streamline: smooth ? 0.5 : 0,
+		});
 		if (!outline.length) return;
-		ctx.beginPath(); ctx.moveTo(outline[0][0], outline[0][1]);
+		ctx.beginPath();
+		ctx.moveTo(outline[0][0], outline[0][1]);
 		for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
-		ctx.closePath(); ctx.fillStyle = stroke.color; ctx.fill();
+		ctx.closePath();
+		ctx.fillStyle = stroke.color;
+		ctx.fill();
 	}
 
 	private touchPointerCount(): number {
@@ -640,11 +829,22 @@ export class PdfNotebookView extends FileView {
 	private startPinch(): void {
 		const points = [...this.pointers.values()].filter((pointer) => pointer.pointerType === "touch").slice(-2);
 		if (points.length < 2) return;
-		const dx = points[1].clientX - points[0].clientX, dy = points[1].clientY - points[0].clientY;
-		const centerX = (points[0].clientX + points[1].clientX) / 2, centerY = (points[0].clientY + points[1].clientY) / 2;
+		const dx = points[1].clientX - points[0].clientX,
+			dy = points[1].clientY - points[0].clientY;
+		const centerX = (points[0].clientX + points[1].clientX) / 2,
+			centerY = (points[0].clientY + points[1].clientY) / 2;
 		const anchor = this.zoomAnchor(centerX, centerY);
 		const pagesRect = this.pagesEl.getBoundingClientRect();
-		this.pinch = { distance: Math.hypot(dx, dy), zoom: this.zoom, originX: centerX, originY: centerY, centerX, centerY, anchor, visualScale: 1 };
+		this.pinch = {
+			distance: Math.hypot(dx, dy),
+			zoom: this.zoom,
+			originX: centerX,
+			originY: centerY,
+			centerX,
+			centerY,
+			anchor,
+			visualScale: 1,
+		};
 		this.pagesEl.style.transformOrigin = `${centerX - pagesRect.left}px ${centerY - pagesRect.top}px`;
 	}
 
@@ -653,10 +853,14 @@ export class PdfNotebookView extends FileView {
 		if (!this.pinch) return;
 		const points = [...this.pointers.values()].filter((pointer) => pointer.pointerType === "touch").slice(-2);
 		if (points.length < 2) return;
-		const dx = points[1].clientX - points[0].clientX, dy = points[1].clientY - points[0].clientY;
+		const dx = points[1].clientX - points[0].clientX,
+			dy = points[1].clientY - points[0].clientY;
 		this.pinch.centerX = (points[0].clientX + points[1].clientX) / 2;
 		this.pinch.centerY = (points[0].clientY + points[1].clientY) / 2;
-		this.pinch.visualScale = Math.max(0.5 / this.pinch.zoom, Math.min(4 / this.pinch.zoom, Math.hypot(dx, dy) / this.pinch.distance));
+		this.pinch.visualScale = Math.max(
+			0.5 / this.pinch.zoom,
+			Math.min(4 / this.pinch.zoom, Math.hypot(dx, dy) / this.pinch.distance),
+		);
 		this.pagesEl.style.transform = `translate(${this.pinch.centerX - this.pinch.originX}px, ${this.pinch.centerY - this.pinch.originY}px) scale(${this.pinch.visualScale})`;
 	}
 
@@ -680,13 +884,19 @@ export class PdfNotebookView extends FileView {
 
 	private undo(): void {
 		const entry = this.history.undo(this.strokes);
-		if (entry) { this.jumpTo(entry.page); this.changed(entry.page); }
+		if (entry) {
+			this.jumpTo(entry.page);
+			this.changed(entry.page);
+		}
 		this.updateHistoryButtons();
 	}
 
 	private redo(): void {
 		const entry = this.history.redo(this.strokes);
-		if (entry) { this.jumpTo(entry.page); this.changed(entry.page); }
+		if (entry) {
+			this.jumpTo(entry.page);
+			this.changed(entry.page);
+		}
 		this.updateHistoryButtons();
 	}
 
@@ -699,7 +909,8 @@ export class PdfNotebookView extends FileView {
 	private handleKeydown(event: KeyboardEvent): void {
 		if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
 		event.preventDefault();
-		if (event.shiftKey) this.redo(); else this.undo();
+		if (event.shiftKey) this.redo();
+		else this.undo();
 	}
 
 	private openPageModal(): void {
@@ -721,7 +932,9 @@ export class PdfNotebookView extends FileView {
 		try {
 			const outline = await this.doc.getOutline();
 			if (outline?.length) this.renderOutline(outline);
-		} catch (err) { debug.log(`PDF outline unavailable: ${String(err)}`, "warn"); }
+		} catch (err) {
+			debug.log(`PDF outline unavailable: ${String(err)}`, "warn");
+		}
 	}
 
 	private renderOutline(items: any[]): void {
@@ -734,7 +947,9 @@ export class PdfNotebookView extends FileView {
 			const pageLabel = row.createSpan({ cls: "goodnodes-pdf-outline-page" });
 			row.style.paddingLeft = `${8 + depth * 14}px`;
 			this.registerDomEvent(row, "click", () => void this.outlineJump(item));
-			void this.outlinePage(item).then((page) => { if (page !== null) pageLabel.setText(String(page + 1)); });
+			void this.outlinePage(item).then((page) => {
+				if (page !== null) pageLabel.setText(String(page + 1));
+			});
 			for (const child of item.items ?? []) add(child, depth + 1);
 		};
 		for (const item of items) add(item, 0);
@@ -747,7 +962,9 @@ export class PdfNotebookView extends FileView {
 			if (!destination) return null;
 			const reference = destination[0];
 			return typeof reference === "number" ? reference : await this.doc.getPageIndex(reference);
-		} catch { return null; }
+		} catch {
+			return null;
+		}
 	}
 
 	private async outlineJump(item: any): Promise<void> {
@@ -758,12 +975,16 @@ export class PdfNotebookView extends FileView {
 			const ref = destination[0];
 			const index = typeof ref === "number" ? ref : await this.doc.getPageIndex(ref);
 			this.jumpTo(index);
-		} catch (err) { debug.error("PDF outline jump failed", err); }
+		} catch (err) {
+			debug.error("PDF outline jump failed", err);
+		}
 	}
 
 	private toggleOutline(): void {
-		if (this.outlineEl) { this.outlineEl.remove(); this.outlineEl = null; }
-		else void this.loadOutline();
+		if (this.outlineEl) {
+			this.outlineEl.remove();
+			this.outlineEl = null;
+		} else void this.loadOutline();
 	}
 
 	private toggleThumbnails(): void {
@@ -780,9 +1001,14 @@ export class PdfNotebookView extends FileView {
 		const panel = this.contentEl.createDiv({ cls: "goodnodes-pdf-thumbnails" });
 		this.thumbPanel = panel;
 		const list = panel.createDiv({ cls: "goodnodes-pdf-thumbnail-list" });
-		this.thumbObserver = new IntersectionObserver((entries) => {
-			for (const entry of entries) if (entry.isIntersecting) void this.renderThumbnail(Number((entry.target as HTMLElement).dataset.page));
-		}, { root: list, rootMargin: "300px 0px" });
+		this.thumbObserver = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries)
+					if (entry.isIntersecting)
+						void this.renderThumbnail(Number((entry.target as HTMLElement).dataset.page));
+			},
+			{ root: list, rootMargin: "300px 0px" },
+		);
 		for (let page = 0; page < this.slots.length; page++) {
 			const item = list.createDiv({ cls: "goodnodes-pdf-thumbnail", attr: { "data-page": String(page) } });
 			item.createDiv({ cls: "goodnodes-pdf-thumbnail-sheet" });
@@ -798,18 +1024,22 @@ export class PdfNotebookView extends FileView {
 		const sheet = item?.querySelector<HTMLElement>(".goodnodes-pdf-thumbnail-sheet");
 		if (!sheet || sheet.querySelector("canvas") || !this.doc) return;
 		try {
-			const page = this.loaded.get(index) ?? await this.doc.getPage(index + 1);
+			const page = this.loaded.get(index) ?? (await this.doc.getPage(index + 1));
 			this.loaded.set(index, page);
 			const displayViewport = page.getViewport({ scale: 1 });
 			const unrotatedViewport = page.getViewport({ scale: 1, rotation: 0 });
 			const slot = this.slots[index];
-			slot.width = displayViewport.width; slot.height = displayViewport.height;
+			slot.width = displayViewport.width;
+			slot.height = displayViewport.height;
 			slot.rotation = displayViewport.rotation ?? page.rotate ?? 0;
-			slot.unrotatedWidth = unrotatedViewport.width; slot.unrotatedHeight = unrotatedViewport.height;
+			slot.unrotatedWidth = unrotatedViewport.width;
+			slot.unrotatedHeight = unrotatedViewport.height;
 			const viewport = page.getViewport({ scale: 150 / displayViewport.width });
 			const canvas = document.createElement("canvas");
-			canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
-			canvas.style.width = "100%"; canvas.style.height = "auto";
+			canvas.width = Math.ceil(viewport.width);
+			canvas.height = Math.ceil(viewport.height);
+			canvas.style.width = "100%";
+			canvas.style.height = "auto";
 			sheet.appendChild(canvas);
 			await page.render({ canvasContext: canvas.getContext("2d", { alpha: false })!, viewport }).promise;
 			this.drawThumbnailInk(index, canvas);
@@ -818,7 +1048,9 @@ export class PdfNotebookView extends FileView {
 				page.cleanup?.();
 				this.loaded.delete(index);
 			}
-		} catch (err) { debug.log(`PDF thumbnail ${index + 1} failed: ${String(err)}`, "warn"); }
+		} catch (err) {
+			debug.log(`PDF thumbnail ${index + 1} failed: ${String(err)}`, "warn");
+		}
 	}
 
 	private drawThumbnailInk(index: number, canvas: HTMLCanvasElement): void {
@@ -830,12 +1062,18 @@ export class PdfNotebookView extends FileView {
 				const [screenX, screenY] = unrotatedToDisplayed(x, y, rotationInfo(slot));
 				return [screenX * scale, screenY * scale, pressure];
 			});
-			const outline = getStroke(points, { size: stroke.width * scale * (stroke.tool === "highlighter" ? 5 : 1), thinning: stroke.tool === "highlighter" ? 0 : 0.6 });
+			const outline = getStroke(points, {
+				size: stroke.width * scale * (stroke.tool === "highlighter" ? 5 : 1),
+				thinning: stroke.tool === "highlighter" ? 0 : 0.6,
+			});
 			if (!outline.length) continue;
 			ctx.globalAlpha = stroke.tool === "highlighter" ? 0.35 : 1;
-			ctx.fillStyle = stroke.color; ctx.beginPath(); ctx.moveTo(outline[0][0], outline[0][1]);
+			ctx.fillStyle = stroke.color;
+			ctx.beginPath();
+			ctx.moveTo(outline[0][0], outline[0][1]);
 			for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
-			ctx.closePath(); ctx.fill();
+			ctx.closePath();
+			ctx.fill();
 		}
 		ctx.globalAlpha = 1;
 	}
@@ -849,29 +1087,43 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private updateThumbnailSelection(): void {
-		this.thumbPanel?.querySelectorAll<HTMLElement>(".goodnodes-pdf-thumbnail").forEach((item) => item.toggleClass("is-current", Number(item.dataset.page) === this.currentPage));
+		this.thumbPanel
+			?.querySelectorAll<HTMLElement>(".goodnodes-pdf-thumbnail")
+			.forEach((item) => item.toggleClass("is-current", Number(item.dataset.page) === this.currentPage));
 	}
 
 	private async loadSidecar(file: TFile, pdfSize: number): Promise<void> {
 		this.loadingSidecar = true;
 		try {
 			if (!(await this.app.vault.adapter.exists(this.sidecarPath))) {
-				this.strokes.clear(); this.currentPage = 0; this.zoom = 1;
+				this.strokes.clear();
+				this.currentPage = 0;
+				this.zoom = 1;
 				this.lastSerialized = "";
 				this.dirty = false;
 				return;
 			}
 			const text = await this.app.vault.adapter.read(this.sidecarPath);
 			const parsed = parseSidecar(text, this.doc.numPages);
-			if (!parsed) { debug.log(`Ignoring invalid or unsupported PDF sidecar: ${this.sidecarPath}`, "warn"); return; }
-			if (parsed.pdf.size !== pdfSize) debug.log(`PDF sidecar size differs from current PDF (${parsed.pdf.size} vs ${pdfSize} bytes); loading anyway`, "warn");
+			if (!parsed) {
+				debug.log(`Ignoring invalid or unsupported PDF sidecar: ${this.sidecarPath}`, "warn");
+				return;
+			}
+			if (parsed.pdf.size !== pdfSize)
+				debug.log(
+					`PDF sidecar size differs from current PDF (${parsed.pdf.size} vs ${pdfSize} bytes); loading anyway`,
+					"warn",
+				);
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
 			this.lastSerialized = text;
 			this.dirty = false;
-		} catch (err) { debug.log(`PDF sidecar read failed: ${String(err)}`, "warn"); }
-		finally { this.loadingSidecar = false; }
+		} catch (err) {
+			debug.log(`PDF sidecar read failed: ${String(err)}`, "warn");
+		} finally {
+			this.loadingSidecar = false;
+		}
 		void file;
 	}
 
@@ -880,7 +1132,8 @@ export class PdfNotebookView extends FileView {
 		const pages: PdfSidecar["pages"] = {};
 		for (const [index, strokes] of this.strokes) if (strokes.length) pages[String(index)] = strokes;
 		return {
-			type: "goodnodes-pdf", version: 1,
+			type: "goodnodes-pdf",
+			version: 1,
 			pdf: { size: file?.stat.size ?? 0, pages: this.slots.length },
 			view: { page: this.currentPage, zoom: this.zoom },
 			pages,
@@ -895,7 +1148,10 @@ export class PdfNotebookView extends FileView {
 	private scheduleSave(): void {
 		if (this.loadingSidecar || this.disposed || !this.sidecarPath || !this.file) return;
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
-		this.saveTimer = window.setTimeout(() => { this.saveTimer = null; void this.writeSidecar(); }, 1000);
+		this.saveTimer = window.setTimeout(() => {
+			this.saveTimer = null;
+			void this.writeSidecar();
+		}, 1000);
 	}
 
 	private async writeSidecar(): Promise<void> {
@@ -917,7 +1173,10 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async flushSave(): Promise<void> {
-		if (this.saveTimer !== null) { window.clearTimeout(this.saveTimer); this.saveTimer = null; }
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+		}
 		if (this.dirty) await this.writeSidecar();
 	}
 
@@ -926,9 +1185,15 @@ export class PdfNotebookView extends FileView {
 		try {
 			const text = await this.app.vault.adapter.read(this.sidecarPath);
 			if (text === this.lastSerialized) return;
-			if (this.dirty) { debug.log("External PDF sidecar changed while local edits are pending; keeping local strokes", "warn"); return; }
+			if (this.dirty) {
+				debug.log("External PDF sidecar changed while local edits are pending; keeping local strokes", "warn");
+				return;
+			}
 			const parsed = parseSidecar(text, this.slots.length);
-			if (!parsed) { debug.log("External PDF sidecar update was invalid; keeping current strokes", "warn"); return; }
+			if (!parsed) {
+				debug.log("External PDF sidecar update was invalid; keeping current strokes", "warn");
+				return;
+			}
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
@@ -942,7 +1207,9 @@ export class PdfNotebookView extends FileView {
 			for (const [index] of this.strokes) this.drawCommittedInk(index);
 			this.restorePage(this.currentPage);
 			this.dirty = false;
-		} catch (err) { debug.log(`External PDF sidecar reload failed: ${String(err)}`, "warn"); }
+		} catch (err) {
+			debug.log(`External PDF sidecar reload failed: ${String(err)}`, "warn");
+		}
 	}
 
 	private restorePage(page: number): void {
@@ -958,27 +1225,48 @@ export class PdfNotebookView extends FileView {
 			const source = await this.app.vault.readBinary(file);
 			const bytes = await createAnnotatedPdf(source, this.strokes);
 			const stem = `${file.parent?.path ? `${file.parent.path}/` : ""}${file.basename} (annotated)`;
-			let path = `${stem}.pdf`, suffix = 2;
+			let path = `${stem}.pdf`,
+				suffix = 2;
 			while (await this.app.vault.adapter.exists(path)) path = `${stem} ${suffix++}.pdf`;
-			const copy = new Uint8Array(bytes.length); copy.set(bytes);
+			const copy = new Uint8Array(bytes.length);
+			copy.set(bytes);
 			await this.app.vault.createBinary(path, copy.buffer);
 			new Notice(`Saved ${path}`);
-		} catch (err) { debug.error("PDF annotation export failed", err); new Notice("Could not export annotated PDF. See GoodNodes debug log."); }
+		} catch (err) {
+			debug.error("PDF annotation export failed", err);
+			new Notice("Could not export annotated PDF. See GoodNodes debug log.");
+		}
 	}
 
 	private clearDocument(): void {
 		this.disposed = true;
-		if (this.saveTimer !== null) { window.clearTimeout(this.saveTimer); this.saveTimer = null; }
-		cancelAnimationFrame(this.raf); this.raf = 0;
-		this.observer?.disconnect(); this.observer = null;
-		this.thumbObserver?.disconnect(); this.thumbObserver = null;
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+		}
+		cancelAnimationFrame(this.raf);
+		this.raf = 0;
+		this.observer?.disconnect();
+		this.observer = null;
+		this.thumbObserver?.disconnect();
+		this.thumbObserver = null;
 		this.queue = [];
 		for (const index of this.slots.keys()) this.release(index);
-		this.slots = []; this.loaded.clear(); this.visible.clear(); this.strokes.clear(); this.history.clear();
-		this.doc?.destroy?.(); this.doc = null;
-		this.pagesEl.empty(); this.outlineEl?.remove(); this.outlineEl = null;
-		this.thumbPanel?.remove(); this.thumbPanel = null;
-		this.activeStroke = null; this.pointers.clear(); this.pinch = null;
+		this.slots = [];
+		this.loaded.clear();
+		this.visible.clear();
+		this.strokes.clear();
+		this.history.clear();
+		this.doc?.destroy?.();
+		this.doc = null;
+		this.pagesEl.empty();
+		this.outlineEl?.remove();
+		this.outlineEl = null;
+		this.thumbPanel?.remove();
+		this.thumbPanel = null;
+		this.activeStroke = null;
+		this.pointers.clear();
+		this.pinch = null;
 		delete debug.live.pdf;
 	}
 }
@@ -987,14 +1275,22 @@ class PageModal extends Modal {
 	constructor(app: App, max: number, jump: (page: number) => void, current: number) {
 		super(app);
 		this.titleEl.setText("Go to page");
-		const input = this.contentEl.createEl("input", { attr: { type: "number", min: "1", max: String(max), value: String(current) } });
-		input.focus(); input.select();
+		const input = this.contentEl.createEl("input", {
+			attr: { type: "number", min: "1", max: String(max), value: String(current) },
+		});
+		input.focus();
+		input.select();
 		input.addEventListener("keydown", (event) => {
 			if (event.key !== "Enter") return;
 			const page = Number(input.value);
-			if (page >= 1 && page <= max) { jump(page); this.close(); }
+			if (page >= 1 && page <= max) {
+				jump(page);
+				this.close();
+			}
 		});
 	}
 }
 
-function round(value: number): number { return Math.round(value * 100) / 100; }
+function round(value: number): number {
+	return Math.round(value * 100) / 100;
+}

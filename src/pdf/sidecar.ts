@@ -14,7 +14,9 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 				tool: stroke.tool,
 				color: stroke.color,
 				width: stroke.width,
-				points: stroke.points.map((point) => [round(point[0]), round(point[1]), clampPressure(point[2])] as [number, number, number]),
+				points: stroke.points.map(
+					(point) => [round(point[0]), round(point[1]), clampPressure(point[2])] as [number, number, number],
+				),
 			}));
 			if (strokes.length) pages[key] = strokes;
 		}
@@ -36,10 +38,11 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 export function serializeSidecar(data: PdfSidecar): string {
 	const pages: Record<string, InkStroke[]> = {};
 	for (const [index, strokes] of Object.entries(data.pages)) {
-		if (strokes.length) pages[index] = strokes.map((stroke) => ({
-			...stroke,
-			points: stroke.points.map(([x, y, pressure]) => [round(x), round(y), clampPressure(pressure)]),
-		}));
+		if (strokes.length)
+			pages[index] = strokes.map((stroke) => ({
+				...stroke,
+				points: stroke.points.map(([x, y, pressure]) => [round(x), round(y), clampPressure(pressure)]),
+			}));
 	}
 	return JSON.stringify({ ...data, pages });
 }
@@ -47,13 +50,32 @@ export function serializeSidecar(data: PdfSidecar): string {
 function isStroke(value: unknown): value is InkStroke {
 	if (!value || typeof value !== "object") return false;
 	const stroke = value as InkStroke;
-	return typeof stroke.id === "string" && (stroke.tool === "pen" || stroke.tool === "highlighter") &&
-		typeof stroke.color === "string" && /^#[\da-f]{6}$/i.test(stroke.color) &&
-		Number.isFinite(stroke.width) && stroke.width > 0 && Array.isArray(stroke.points) &&
-		stroke.points.length > 0 && stroke.points.every((point) => Array.isArray(point) && point.length >= 3 &&
-			Number.isFinite(point[0]) && Number.isFinite(point[1]) && Number.isFinite(point[2]));
+	return (
+		typeof stroke.id === "string" &&
+		(stroke.tool === "pen" || stroke.tool === "highlighter") &&
+		typeof stroke.color === "string" &&
+		/^#[\da-f]{6}$/i.test(stroke.color) &&
+		Number.isFinite(stroke.width) &&
+		stroke.width > 0 &&
+		Array.isArray(stroke.points) &&
+		stroke.points.length > 0 &&
+		stroke.points.every(
+			(point) =>
+				Array.isArray(point) &&
+				point.length >= 3 &&
+				Number.isFinite(point[0]) &&
+				Number.isFinite(point[1]) &&
+				Number.isFinite(point[2]),
+		)
+	);
 }
 
-function round(value: number): number { return Math.round(value * 100) / 100; }
-function clampPressure(value: number): number { return clamp(value, 0, 1); }
-function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
+function round(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+function clampPressure(value: number): number {
+	return clamp(value, 0, 1);
+}
+function clamp(value: number, min: number, max: number): number {
+	return Math.max(min, Math.min(max, value));
+}

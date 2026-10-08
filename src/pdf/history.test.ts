@@ -28,4 +28,6 @@ describe("PDF history", () => {
 	});
 });
 
-function historySetup(pages: Map<number, InkStroke[]>, strokes: InkStroke[]): void { pages.set(3, strokes); }
+function historySetup(pages: Map<number, InkStroke[]>, strokes: InkStroke[]): void {
+	pages.set(3, strokes);
+}

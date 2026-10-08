@@ -59,15 +59,13 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 			.setName("Default pen color")
 			.setDesc("Ink color for new strokes in PDF notebooks.")
 			.addColorPicker((c) => c.setValue(s.penColor).onChange((v) => ((s.penColor = v), save())));
-		new Setting(containerEl)
-			.setName("Default pen width")
-			.addSlider((sl) =>
-				sl
-					.setLimits(0.5, 8, 0.5)
-					.setValue(s.penWidth)
-					.setDynamicTooltip()
-					.onChange((v) => ((s.penWidth = v), save())),
-			);
+		new Setting(containerEl).setName("Default pen width").addSlider((sl) =>
+			sl
+				.setLimits(0.5, 8, 0.5)
+				.setValue(s.penWidth)
+				.setDynamicTooltip()
+				.onChange((v) => ((s.penWidth = v), save())),
+		);
 		new Setting(containerEl)
 			.setName("Highlighter color")
 			.addColorPicker((c) => c.setValue(s.highlighterColor).onChange((v) => ((s.highlighterColor = v), save())));
@@ -77,7 +75,9 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 			.addToggle((t) => t.setValue(s.smoothing).onChange((v) => ((s.smoothing = v), save())));
 		new Setting(containerEl)
 			.setName("Palm rejection: max finger size")
-			.setDesc("Touches with a larger contact area are ignored as a resting palm. 0 turns this off. Touches are always ignored while the pen is down.")
+			.setDesc(
+				"Touches with a larger contact area are ignored as a resting palm. 0 turns this off. Touches are always ignored while the pen is down.",
+			)
 			.addSlider((sl) =>
 				sl
 					.setLimits(0, 120, 5)
@@ -119,12 +119,19 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Files").setHeading();
 		new Setting(containerEl)
 			.setName("Open PDFs in GoodNodes")
-			.setDesc("Tapping a PDF opens it as a notebook instead of Obsidian's viewer. Restart Obsidian after changing.")
+			.setDesc(
+				"Tapping a PDF opens it as a notebook instead of Obsidian's viewer. Restart Obsidian after changing.",
+			)
 			.addToggle((t) => t.setValue(s.openPdfByDefault).onChange((v) => ((s.openPdfByDefault = v), save())));
 		new Setting(containerEl)
 			.setName("Image folder")
 			.setDesc("Where images added to a canvas are stored. Empty = Obsidian's attachment folder setting.")
-			.addText((t) => t.setPlaceholder("e.g. Attachments").setValue(s.imageFolder).onChange((v) => ((s.imageFolder = v.trim()), save())));
+			.addText((t) =>
+				t
+					.setPlaceholder("e.g. Attachments")
+					.setValue(s.imageFolder)
+					.onChange((v) => ((s.imageFolder = v.trim()), save())),
+			);
 
 		new Setting(containerEl).setName("Troubleshooting").setHeading();
 		new Setting(containerEl)

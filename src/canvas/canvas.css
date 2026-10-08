@@ -15,7 +15,9 @@
 	user-select: none;
 	-webkit-touch-callout: none;
 }
-.theme-dark .goodnodes-canvas-host { background: #1e1e1e; }
+.theme-dark .goodnodes-canvas-host {
+	background: #1e1e1e;
+}
 .goodnodes-canvas-bg,
 .goodnodes-canvas-excalidraw {
 	position: absolute;
@@ -23,12 +25,20 @@
 	width: 100%;
 	height: 100%;
 }
-.goodnodes-canvas-bg { pointer-events: none; }
-.goodnodes-canvas-excalidraw .excalidraw { --zIndex-layerUI: 4; }
+.goodnodes-canvas-bg {
+	pointer-events: none;
+}
+.goodnodes-canvas-excalidraw .excalidraw {
+	--zIndex-layerUI: 4;
+}
 /* Obsidian's global button styles leak into Excalidraw. */
-.goodnodes-canvas-excalidraw .excalidraw button { box-shadow: none; }
+.goodnodes-canvas-excalidraw .excalidraw button {
+	box-shadow: none;
+}
 
-.goodnodes-bg-picker { position: relative; }
+.goodnodes-bg-picker {
+	position: relative;
+}
 .goodnodes-bg-button {
 	width: 2.25rem;
 	height: 2.25rem;
@@ -59,9 +69,18 @@
 	background: transparent;
 	color: var(--text-color-primary, var(--text-normal));
 }
-.goodnodes-bg-menu button.is-active { background: var(--color-surface-primary-container, var(--background-modifier-hover)); }
-.goodnodes-bg-button { display: flex; align-items: center; justify-content: center; }
-.goodnodes-bg-menu button { display: flex; align-items: center; }
+.goodnodes-bg-menu button.is-active {
+	background: var(--color-surface-primary-container, var(--background-modifier-hover));
+}
+.goodnodes-bg-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.goodnodes-bg-menu button {
+	display: flex;
+	align-items: center;
+}
 .goodnodes-bg-sizes {
 	display: flex;
 	gap: 2px;
@@ -69,4 +88,7 @@
 	padding-top: 4px;
 	border-top: 1px solid var(--default-border-color, var(--background-modifier-border));
 }
-.goodnodes-bg-sizes button { flex: 1; justify-content: center; }
+.goodnodes-bg-sizes button {
+	flex: 1;
+	justify-content: center;
+}

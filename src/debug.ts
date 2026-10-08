@@ -26,7 +26,8 @@ class DebugLog {
 	}
 
 	error(msg: string, err?: unknown): void {
-		const detail = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : err !== undefined ? String(err) : "";
+		const detail =
+			err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : err !== undefined ? String(err) : "";
 		this.log(detail ? `${msg}: ${detail}` : msg, "error");
 	}
 

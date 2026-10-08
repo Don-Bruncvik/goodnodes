@@ -93,7 +93,9 @@ export class CanvasImages {
 	}
 
 	/** Replace dataURLs by vault paths where the image is already stored. */
-	toStored(sceneFiles: Record<string, { id: string; mimeType: string; created: number; dataURL: string }>): Record<string, StoredFile> {
+	toStored(
+		sceneFiles: Record<string, { id: string; mimeType: string; created: number; dataURL: string }>,
+	): Record<string, StoredFile> {
 		const out: Record<string, StoredFile> = {};
 		for (const [id, f] of Object.entries(sceneFiles ?? {})) {
 			const path = this.paths.get(id);

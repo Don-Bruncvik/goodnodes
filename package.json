@@ -8,7 +8,8 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
     "make-test-pdf": "node scripts/make-test-pdf.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "license": "MIT",
   "devDependencies": {
@@ -17,6 +18,7 @@
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.28.2",
     "obsidian": "^1.13.1",
+    "prettier": "^3.9.9",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   },

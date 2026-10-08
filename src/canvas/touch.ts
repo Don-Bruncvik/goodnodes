@@ -117,7 +117,9 @@ export class TouchGestures {
 		}
 		const max = this.host.maxTouchSize();
 		if (max > 0 && Math.max(e.width, e.height) > max) {
-			debug.log(`touch #${e.pointerId} ignored (contact ${e.width.toFixed(0)}×${e.height.toFixed(0)} > ${max}, palm)`);
+			debug.log(
+				`touch #${e.pointerId} ignored (contact ${e.width.toFixed(0)}×${e.height.toFixed(0)} > ${max}, palm)`,
+			);
 			return;
 		}
 		this.touches.set(e.pointerId, this.local(e));
@@ -148,7 +150,9 @@ export class TouchGestures {
 		// A finger that started on the surface keeps its gesture even if it slides over UI.
 		if (e.type === "touchstart" && !this.onSurface(e)) return;
 		if (e.type !== "touchstart" && this.owned.size === 0) return;
-		const stylus = Array.from(e.changedTouches).some((t) => (t as Touch & { touchType?: string }).touchType === "stylus");
+		const stylus = Array.from(e.changedTouches).some(
+			(t) => (t as Touch & { touchType?: string }).touchType === "stylus",
+		);
 		if (stylus) return;
 		e.stopPropagation();
 		if (e.cancelable) e.preventDefault();
