@@ -55,7 +55,8 @@ export class PdfNotebookView extends FileView {
 	private strokes = new Map<number, InkStroke[]>();
 	private history = new PdfHistory();
 	private toolState: SessionTool;
-	private activeStroke: { page: number; points: InkPoint[]; tool: Tool } | null = null;
+	/** The stroke in progress belongs to exactly one pen/mouse pointer. */
+	private activeStroke: { pointerId: number; page: number; points: InkPoint[]; tool: Tool } | null = null;
 	private pointers = new Map<number, PointerEvent>();
 	private pinch: Gesture | null = null;
 	private penUntil = 0;
@@ -67,7 +68,10 @@ export class PdfNotebookView extends FileView {
 	private sidecarPath = "";
 	private lastSerialized = "";
 	private saveTimer: number | null = null;
+	private loadGeneration = 0;
 	private dirty = false;
+	/** Bumped on every change; a finished write only clears `dirty` if nothing changed meanwhile. */
+	private revision = 0;
 	private loadingSidecar = false;
 	private currentPage = 0;
 	private touchStart = (e: TouchEvent) => this.blockStylusTouch(e);
@@ -132,7 +136,11 @@ export class PdfNotebookView extends FileView {
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {
+		const load = ++this.loadGeneration;
+		// A newer onLoadFile (user switched PDFs mid-load) makes this one obsolete.
+		const stale = () => load !== this.loadGeneration || this.file !== file;
 		await this.flushSave();
+		if (stale()) return;
 		this.clearDocument();
 		this.disposed = false;
 		this.sidecarPath = `${file.path}.goodnodes.json`;
@@ -141,14 +149,22 @@ export class PdfNotebookView extends FileView {
 			this.pdfjs = await loadPdfJs();
 			debug.log(`pdf.js ${this.pdfjs?.version ?? "version unavailable"}`);
 			const data = await this.app.vault.readBinary(file);
-			this.doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+			if (stale()) return;
+			const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+			if (stale()) {
+				void doc.destroy();
+				return;
+			}
+			this.doc = doc;
 			const first = await this.doc.getPage(1);
+			if (stale()) return;
 			const viewport = first.getViewport({ scale: 1 });
 			this.baseWidth = viewport.width;
 			this.baseHeight = viewport.height;
 			this.pageScale = this.fitScale();
 			// pdf.js transfers (detaches) `data` to its worker, so take the size from the file.
 			await this.loadSidecar(file, file.stat.size);
+			if (stale()) return;
 			this.buildSlots();
 			// Refit once the page list exists: a vertical scrollbar may have taken some width.
 			requestAnimationFrame(() => this.onResize());
@@ -273,7 +289,7 @@ export class PdfNotebookView extends FileView {
 			const distance = Math.abs(slot.el.offsetTop + slot.el.offsetHeight / 2 - center);
 			if (distance < best) { best = distance; current = i; }
 		});
-		if (this.currentPage !== current) this.dirty = true;
+		if (this.currentPage !== current) this.markDirty();
 		this.currentPage = current;
 		this.indicator.setText(`${current + 1} / ${this.slots.length}`);
 		this.updateThumbnailSelection();
@@ -398,7 +414,7 @@ export class PdfNotebookView extends FileView {
 		const next = Math.max(0.5, Math.min(4, value));
 		if (Math.abs(next - this.zoom) < 0.001) return;
 		this.relayout(() => (this.zoom = next), clientX, clientY);
-		this.dirty = true;
+		this.markDirty();
 	}
 
 	/** Pages fit the view width at zoom 1; refit when the view is resized (rotation, sidebars). */
@@ -463,7 +479,7 @@ export class PdfNotebookView extends FileView {
 		if (event.pointerType === "pen") this.penDown = true;
 		const hit = this.pageAt(event);
 		if (!hit) return;
-		this.activeStroke = { page: hit[0], points: [hit[1]], tool: this.toolState.tool };
+		this.activeStroke = { pointerId: event.pointerId, page: hit[0], points: [hit[1]], tool: this.toolState.tool };
 		try { (event.target as HTMLElement).setPointerCapture(event.pointerId); } catch { /* The page may unload mid-gesture. */ }
 		event.preventDefault();
 		this.drawLive(this.activeStroke.page);
@@ -477,7 +493,7 @@ export class PdfNotebookView extends FileView {
 			return;
 		}
 		if (event.pointerType === "touch" && this.ignoredTouches.has(event.pointerId)) return;
-		if (!this.activeStroke) return;
+		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
 		const events = event.getCoalescedEvents?.() ?? [event];
 		for (const item of events) {
 			const hit = this.pageAt(item);
@@ -494,7 +510,7 @@ export class PdfNotebookView extends FileView {
 		this.ignoredTouches.delete(event.pointerId);
 		this.pointers.delete(event.pointerId);
 		if (this.pinch && this.touchPointerCount() < 2) this.endPinch();
-		if (!this.activeStroke) return;
+		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
 		const { page, points, tool } = this.activeStroke;
 		this.activeStroke = null;
 		if (tool === "eraser") this.commitEraser(page, points);
@@ -550,7 +566,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private changed(page: number): void {
-		this.dirty = true;
+		this.markDirty();
 		this.drawCommittedInk(page);
 		this.updateHistoryButtons();
 		this.scheduleSave();
@@ -650,7 +666,7 @@ export class PdfNotebookView extends FileView {
 		this.pagesEl.style.transform = "";
 		this.pagesEl.style.transformOrigin = "";
 		this.zoom = Math.max(0.5, Math.min(4, gesture.zoom * gesture.visualScale));
-		this.dirty = true;
+		this.markDirty();
 		this.releaseAll();
 		for (const slot of this.slots) {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
@@ -658,7 +674,7 @@ export class PdfNotebookView extends FileView {
 		}
 		this.applyZoomAnchor(gesture.anchor, gesture.centerX, gesture.centerY);
 		this.pinch = null;
-		this.dirty = true;
+		this.markDirty();
 		this.scheduleUpdate();
 	}
 
@@ -871,6 +887,11 @@ export class PdfNotebookView extends FileView {
 		};
 	}
 
+	private markDirty(): void {
+		this.dirty = true;
+		this.revision++;
+	}
+
 	private scheduleSave(): void {
 		if (this.loadingSidecar || this.disposed || !this.sidecarPath || !this.file) return;
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
@@ -879,13 +900,20 @@ export class PdfNotebookView extends FileView {
 
 	private async writeSidecar(): Promise<void> {
 		if (this.loadingSidecar || !this.sidecarPath || !this.file) return;
+		const revision = this.revision;
 		const serialized = serializeSidecar(this.makeSidecar());
-		if (serialized === this.lastSerialized) { this.dirty = false; return; }
+		if (serialized === this.lastSerialized) {
+			if (revision === this.revision) this.dirty = false;
+			return;
+		}
 		try {
 			await this.app.vault.adapter.write(this.sidecarPath, serialized);
 			this.lastSerialized = serialized;
-			this.dirty = false;
-		} catch (err) { debug.error("PDF sidecar save failed", err); }
+			if (revision === this.revision) this.dirty = false;
+			else this.scheduleSave();
+		} catch (err) {
+			debug.error("PDF sidecar save failed", err);
+		}
 	}
 
 	private async flushSave(): Promise<void> {
