@@ -17,8 +17,10 @@ Handwritten notebooks for Obsidian, made for the iPad and Apple Pencil. A GoodNo
 | Undo / redo (scratch-out undoes in one step) | ✅ | ✅ |
 | Paper background: blank, grid, dots | ✅ | – |
 | Text, shapes, arrows, images (Excalidraw) | ✅ | – |
-| Pen, highlighter, eraser, colors, widths | Excalidraw tools | ✅ |
-| Page indicator, jump to page, outline, thumbnails | – | ✅ |
+| Tap the active pen to pick color & width | ✅ | ✅ |
+| Pen, highlighter, eraser | Excalidraw tools | ✅ |
+| Pages sidebar: thumbnails, outline, bookmarks | – | ✅ |
+| Draggable page scrubber, jump to page | – | ✅ |
 | Export "PDF with notes" | Excalidraw image export | ✅ |
 | Dark / light theme follows Obsidian | ✅ | ✅ |
 
@@ -33,6 +35,7 @@ Everything is a plain file in your vault, so any sync method works (Obsidian Syn
 
 - **New canvas**: click the ✏️ ribbon icon, or right-click a folder and choose *New GoodNodes canvas*. Tap any `.goodnodes` file to open it.
 - **PDF as notebook**: click the 📖 ribbon icon and pick a PDF, or right-click a PDF and choose *Open as GoodNodes notebook*. In settings you can make tapping a PDF always open it in GoodNodes.
+- **Pen color & width**: tap the pen once to select it, tap it again to open its color and width picker. Your choice is remembered.
 - **Scratch out**: scribble firmly back and forth (at least ~4 direction changes) over handwriting. Strokes mostly covered by the scribble disappear together with the scribble. One or two lines through a word, or a scribble over empty space, stay as normal strokes. You can tune or disable this in settings.
 
 ## Install

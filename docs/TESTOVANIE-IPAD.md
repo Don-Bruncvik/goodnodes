@@ -20,10 +20,11 @@ Na Macu som overil všetko, čo sa dá bez pera. Toto sa dá overiť len na iPad
 8. Prečiarkni iné slovo jednou alebo dvoma čiarami. Nič sa nezmaže.
 9. Pocmáraj prázdne miesto. Čmáranica ostane ako ťah.
 10. Vpravo hore je tlačidlo pozadia: prepni na štvorčeky, potom bodky a skús veľkosti S/M/L. Raster sa pri zoome a posune hýbe spolu s plátnom.
-11. Prstom klepni na nástroje v hornom paneli (obdĺžnik, text, obrázok, farba). Musia reagovať normálne.
-12. Vlož obrázok (ikona obrázka v paneli). Vo vaulte pribudne `.png`/`.jpg` súbor.
-13. Vodorovný ťah perom alebo prstom na plátne nesmie otvoriť bočný panel Obsidianu.
-14. Zatvor Obsidian (aj z prepínača aplikácií), znovu ho otvor a otvor zošit. Všetko je na mieste, aj pozadie.
+11. Klepni na pero, keď už je vybraté: otvorí sa okienko s farbou a hrúbkou (ľavý panel Excalidrawu sa pri pere neukazuje). Vyber farbu, píš, prepni na obdĺžnik a späť: pero si farbu pamätá.
+12. Prstom klepni na nástroje v hornom paneli (obdĺžnik, text, obrázok, farba). Musia reagovať normálne.
+13. Vlož obrázok (ikona obrázka v paneli). Vo vaulte pribudne `.png`/`.jpg` súbor.
+14. Vodorovný ťah perom alebo prstom na plátne nesmie otvoriť bočný panel Obsidianu.
+15. Zatvor Obsidian (aj z prepínača aplikácií), znovu ho otvor a otvor zošit. Všetko je na mieste, aj pozadie.
 
 ## B. PDF zošit
 1. Klepni na 📖 v ribbone a vyber väčšie PDF (napr. učebnicu). Prvá strana sa má zobraziť do 1 až 2 s.
@@ -31,9 +32,10 @@ Na Macu som overil všetko, čo sa dá bez pera. Toto sa dá overiť len na iPad
 3. Dvoma prstami približuj. Počas gesta sa strana zväčší, po pustení sa zaostrí.
 4. Píš perom do strany. Pero nesmie scrollovať stránku.
 5. Klepni na „12 / 300“ dole, zadaj číslo strany a stlač Enter. Skočí tam do 1 s.
-6. Vyskúšaj na paneli zvýrazňovač, gumu, farby a hrúbky. Potom ↶ a ↷ vľavo hore.
+6. Klepni na pero ešte raz: otvorí sa okienko s farbami a hrúbkami. To isté platí pre zvýrazňovač aj gumu (veľkosť). Potom vyskúšaj ↶ a ↷ vľavo hore.
 7. Zaškrtaj napísané slovo cik-cak. Zmizne (rovnako ako na plátne).
-8. Otvor ☰ (obsah PDF) a ▦ (miniatúry) a klepni na položku. Skočí na danú stranu.
+8. Otvor panel vľavo (prvá ikona na paneli). Záložky Strany / Obsah / Záložky fungujú a klepnutie skočí na stranu. Ikonou záložky si označ stranu: objaví sa v záložke Záložky.
+8b. Ťahaj posuvník pri pravom okraji (perom aj prstom). Ukazuje číslo strany a nič nenakreslí.
 9. Zatvor a znovu otvor PDF. Poznámky sú na mieste a otvorí sa na strane, kde si skončil.
 10. Export (ikona so šípkou dole) vytvorí `<názov> (annotated).pdf` s tvojimi poznámkami.
 
