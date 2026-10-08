@@ -1,0 +1,29 @@
+{
+  "name": "goodnodes",
+  "version": "0.0.1",
+  "description": "GoodNotes-style handwriting for Obsidian: infinite canvas and PDF notebooks, pen draws, fingers pan & zoom.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
+    "pdf-lib": "^1.17.1",
+    "perfect-freehand": "^1.2.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
+}

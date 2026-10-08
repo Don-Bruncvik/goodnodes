@@ -1,0 +1,9 @@
+node_modules/
+main.js
+styles.css
+main.css
+*.map
+test-vault/.obsidian/workspace*.json
+test-vault/.obsidian/plugins/goodnodes/
+test-vault/.trash/
+.DS_Store
