@@ -106,6 +106,10 @@ export class PdfNotebookView extends FileView {
 		this.contentEl.tabIndex = 0;
 		this.scroller.addEventListener("touchstart", this.touchStart, { passive: false });
 		this.scroller.addEventListener("touchmove", this.touchMove, { passive: false });
+		// Obsidian mobile opens sidebars on horizontal swipes; writing or panning a page must not.
+		for (const type of ["touchstart", "touchmove", "touchend"] as const) {
+			this.registerDomEvent(this.scroller, type, (e: TouchEvent) => e.stopPropagation(), { passive: true });
+		}
 		this.registerEvent((this.app.vault as any).on("raw", (path: string) => {
 			if (path === this.sidecarPath) void this.readExternalSidecar();
 		}));
@@ -143,7 +147,8 @@ export class PdfNotebookView extends FileView {
 			this.baseWidth = viewport.width;
 			this.baseHeight = viewport.height;
 			this.pageScale = this.fitScale();
-			await this.loadSidecar(file, data.byteLength);
+			// pdf.js transfers (detaches) `data` to its worker, so take the size from the file.
+			await this.loadSidecar(file, file.stat.size);
 			this.buildSlots();
 			this.observe();
 			this.restorePage(this.currentPage);
