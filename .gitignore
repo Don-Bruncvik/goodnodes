@@ -7,3 +7,10 @@ test-vault/.obsidian/workspace*.json
 test-vault/.obsidian/plugins/goodnodes/
 test-vault/.trash/
 .DS_Store
+# test vault: keep only fixtures
+test-vault/*.goodnodes
+test-vault/*.png
+test-vault/**/*.goodnodes.json
+test-vault/**/* (annotated)*.pdf
+test-vault/.obsidian/plugins/
+test-vault/.obsidian/appearance.json
