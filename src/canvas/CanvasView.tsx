@@ -1,4 +1,4 @@
-import { TextFileView, WorkspaceLeaf } from "obsidian";
+import { TFile, TextFileView, WorkspaceLeaf } from "obsidian";
 import { StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CaptureUpdateAction, Excalidraw, getSceneVersion, restore, serializeAsJSON } from "@excalidraw/excalidraw";
@@ -71,6 +71,7 @@ export class CanvasView extends TextFileView {
 	private lastData = "";
 	/** Scene version + background as of lastData; a change means unsaved edits. */
 	private savedVersion = "";
+	private savedViewport = "";
 	private loading = false;
 	private unsubs: (() => void)[] = [];
 	private mountId = 0;
@@ -102,7 +103,27 @@ export class CanvasView extends TextFileView {
 	}
 
 	async onClose(): Promise<void> {
+		await this.flushViewport();
 		this.unmount();
+	}
+
+	async onUnloadFile(file: TFile): Promise<void> {
+		await this.flushViewport();
+		await super.onUnloadFile(file);
+	}
+
+	/**
+	 * Panning/zooming alone doesn't mark the file dirty (that would rewrite and
+	 * re-sync it constantly); the viewport is written once, when the file closes.
+	 */
+	private async flushViewport(): Promise<void> {
+		const file = this.file;
+		if (!this.api || !file || JSON.stringify(this.viewport) === this.savedViewport) return;
+		try {
+			await this.app.vault.modify(file, this.getViewData());
+		} catch (e) {
+			debug.error("cannot save viewport", e);
+		}
 	}
 
 	// ---- TextFileView contract ----
@@ -116,6 +137,7 @@ export class CanvasView extends TextFileView {
 		const data = JSON.stringify(file);
 		this.lastData = data;
 		this.savedVersion = this.currentVersion();
+		this.savedViewport = JSON.stringify(this.viewport);
 		return data;
 	}
 
@@ -150,6 +172,7 @@ export class CanvasView extends TextFileView {
 		const mountId = ++this.mountId;
 		this.background = file.background;
 		this.viewport = file.viewport;
+		this.savedViewport = JSON.stringify(file.viewport);
 		this.images.reset(file.scene.files);
 
 		const restored = restoreScene(file.scene);
