@@ -37,7 +37,7 @@ Na Macu som overil všetko, čo sa dá bez pera. Toto sa dá overiť len na iPad
 8. Otvor panel vľavo (prvá ikona na paneli). Záložky Strany / Obsah / Záložky fungujú a klepnutie skočí na stranu. Ikonou záložky si označ stranu: objaví sa v záložke Záložky.
 8b. Ťahaj posuvník pri pravom okraji (perom aj prstom). Ukazuje číslo strany a nič nenakreslí.
 9. Zatvor a znovu otvor PDF. Poznámky sú na mieste a otvorí sa na strane, kde si skončil.
-10. Export (ikona so šípkou dole) vytvorí `<názov> (annotated).pdf` s tvojimi poznámkami.
+10. Menu „…“ na paneli: priblíženie, Fit width, Go to page a Export PDF with notes. Export vytvorí `<názov> (annotated).pdf` s tvojimi poznámkami.
 
 ## C. Synchronizácia (Remotely Save)
 1. Po synchronizácii sa na druhom zariadení zobrazí súbor `.goodnodes` aj `<názov>.pdf.goodnodes.json` a otvoria sa rovnako.

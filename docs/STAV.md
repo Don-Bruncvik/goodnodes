@@ -1,4 +1,4 @@
-# GoodNodes: stav k 8. 10. 2026 (verzia 0.1.1)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.2.0)
 
 ## Výsledky spike M0
 
@@ -17,6 +17,10 @@
 **Plátno (M1):** vytvorenie z ribbonu aj z menu priečinka, pero ako predvolený nástroj, prsty posúvajú a približujú (aj s perom v ruke), klepnutie prstom na panel funguje, odmietanie dlane, pozadie (prázdne, štvorčeky, bodky, S/M/L) uložené v súbore, preškrtnutie, obrázky ako súbory vo vaulte, opätovné načítanie po synchronizácii, zapamätanie pozície a zoomu, svetlá a tmavá téma, fonty v pluginu (funguje offline).
 
 **PDF zošit (M2):** lazy render, pinch zoom, pero, zvýrazňovač, guma, 6 farieb a 3 hrúbky, späť a vpred (tlačidlá aj Cmd+Z), preškrtnutie, indikátor a skok na stranu, obsah PDF, miniatúry, pamätanie poslednej strany, sidecar súbor `<pdf>.goodnodes.json`, export „PDF s poznámkami“ (pdf-lib), prispôsobenie šírke pri otočení iPadu.
+
+**0.2.0 (po prvom teste na iPade):**
+- Nastavenie pera sa otvára klepnutím na už vybraté pero, v plátne aj v PDF. Farba a hrúbka sa pamätajú. Ľavý panel Excalidrawu sa pri pere nezobrazuje.
+- PDF v štýle GoodNotes: zjednodušený panel nástrojov, ľavý panel so záložkami Strany / Obsah / Záložky, záložky strán, posuvník, ktorým sa dá ťahať po stranách, a menu „…“ (zoom, prejsť na stranu, export).
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 
