@@ -36,6 +36,8 @@ interface Pt {
 
 export class TouchGestures {
 	private touches = new Map<number, Pt>();
+	/** Touch pointers that started on the surface; their events never reach Excalidraw. */
+	private owned = new Set<number>();
 	private pens = new Set<number>();
 	private penUpAt = 0;
 	/** Gesture baseline, reset whenever the number of fingers changes. */
@@ -60,6 +62,13 @@ export class TouchGestures {
 		// Finger touch events would otherwise trigger Excalidraw's own touch handling
 		// and WebKit's native gestures; stylus touches are left alone.
 		for (const type of ["touchstart", "touchmove", "touchend"] as const) on(type, this.onTouch);
+		// Stylus touches do reach Excalidraw, but must not bubble further: Obsidian
+		// mobile opens its sidebars on horizontal swipes.
+		for (const type of ["touchstart", "touchmove", "touchend"] as const) {
+			const stop = (e: TouchEvent) => e.stopPropagation();
+			el.addEventListener(type, stop, { passive: true });
+			this.cleanup.push(() => el.removeEventListener(type, stop));
+		}
 		// Safari pinch events (Excalidraw listens to these for its own zoom).
 		for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
 			const fn = (e: Event) => {
@@ -77,6 +86,15 @@ export class TouchGestures {
 		this.cleanup = [];
 	}
 
+	/**
+	 * Only touches on the drawing surface are gestures. Taps on Excalidraw's
+	 * toolbar, menus and text editor must reach them untouched.
+	 */
+	private onSurface(e: Event): boolean {
+		const t = e.target;
+		return t === this.el || t instanceof HTMLCanvasElement;
+	}
+
 	private local(e: PointerEvent): Pt {
 		const r = this.el.getBoundingClientRect();
 		return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -89,9 +107,10 @@ export class TouchGestures {
 	private onPointerDown = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
 		if (e.pointerType === "pen") this.pens.add(e.pointerId);
-		if (e.pointerType !== "touch") return;
+		if (e.pointerType !== "touch" || !this.onSurface(e)) return;
 		e.stopPropagation();
 		e.preventDefault();
+		this.owned.add(e.pointerId);
 		if (this.isPenActive()) {
 			debug.log(`touch #${e.pointerId} ignored (pen active, palm)`);
 			return;
@@ -107,7 +126,7 @@ export class TouchGestures {
 
 	private onPointerMove = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
-		if (e.pointerType !== "touch") return;
+		if (e.pointerType !== "touch" || !this.owned.has(e.pointerId)) return;
 		e.stopPropagation();
 		e.preventDefault();
 		if (!this.touches.has(e.pointerId)) return;
@@ -118,7 +137,7 @@ export class TouchGestures {
 	private onPointerUp = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
 		if (e.pointerType === "pen" && this.pens.delete(e.pointerId)) this.penUpAt = performance.now();
-		if (e.pointerType !== "touch") return;
+		if (e.pointerType !== "touch" || !this.owned.delete(e.pointerId)) return;
 		e.stopPropagation();
 		e.preventDefault();
 		if (!this.touches.delete(e.pointerId)) return;
@@ -126,6 +145,9 @@ export class TouchGestures {
 	};
 
 	private onTouch = (e: TouchEvent) => {
+		// A finger that started on the surface keeps its gesture even if it slides over UI.
+		if (e.type === "touchstart" && !this.onSurface(e)) return;
+		if (e.type !== "touchstart" && this.owned.size === 0) return;
 		const stylus = Array.from(e.changedTouches).some((t) => (t as Touch & { touchType?: string }).touchType === "stylus");
 		if (stylus) return;
 		e.stopPropagation();
