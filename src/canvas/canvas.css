@@ -59,3 +59,13 @@
 	color: var(--text-color-primary, var(--text-normal));
 }
 .goodnodes-bg-menu button.is-active { background: var(--color-surface-primary-container, var(--background-modifier-hover)); }
+.goodnodes-bg-button { display: flex; align-items: center; justify-content: center; }
+.goodnodes-bg-menu button { display: flex; align-items: center; }
+.goodnodes-bg-sizes {
+	display: flex;
+	gap: 2px;
+	margin-top: 2px;
+	padding-top: 4px;
+	border-top: 1px solid var(--default-border-color, var(--background-modifier-border));
+}
+.goodnodes-bg-sizes button { flex: 1; justify-content: center; }

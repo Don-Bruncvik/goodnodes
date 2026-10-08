@@ -86,7 +86,11 @@ export class BackgroundLayer {
 		// Screen position of scene coordinate 0 along each axis, folded into [0, s).
 		const ox = mod(scrollX * zoom, s);
 		const oy = mod(scrollY * zoom, s);
-		const ink = color ?? (this.dark ? "rgba(255,255,255,0.16)" : "rgba(0,0,0,0.18)");
+		const ink =
+			color ??
+			(kind === "dots"
+				? this.dark ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.22)"
+				: this.dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.09)");
 
 		if (kind === "dots") {
 			ctx.fillStyle = ink;

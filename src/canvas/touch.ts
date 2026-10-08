@@ -20,6 +20,8 @@ export interface Viewport {
 export interface TouchGestureHost {
 	getViewport(): Viewport;
 	setViewport(v: Viewport): void;
+	/** Touches with a larger contact (CSS px) are a palm; 0 = no limit. */
+	maxTouchSize(): number;
 }
 
 const MIN_ZOOM = 0.1;
@@ -92,6 +94,11 @@ export class TouchGestures {
 		e.preventDefault();
 		if (this.isPenActive()) {
 			debug.log(`touch #${e.pointerId} ignored (pen active, palm)`);
+			return;
+		}
+		const max = this.host.maxTouchSize();
+		if (max > 0 && Math.max(e.width, e.height) > max) {
+			debug.log(`touch #${e.pointerId} ignored (contact ${e.width.toFixed(0)}×${e.height.toFixed(0)} > ${max}, palm)`);
 			return;
 		}
 		this.touches.set(e.pointerId, this.local(e));

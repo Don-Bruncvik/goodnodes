@@ -2,7 +2,7 @@ import { TextFileView, WorkspaceLeaf } from "obsidian";
 import { StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CaptureUpdateAction, Excalidraw, getSceneVersion, restore, serializeAsJSON } from "@excalidraw/excalidraw";
-import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
+import type { AppState, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import "@excalidraw/excalidraw/index.css";
 import "./canvas.css";
@@ -11,17 +11,21 @@ import { debug } from "../debug";
 import { BackgroundLayer, DEFAULT_BACKGROUND, type BackgroundKind, type BackgroundSettings } from "./background";
 import { TouchGestures, type Viewport } from "./touch";
 import { handleFinishedStroke } from "./scratch";
+import { CanvasImages, type StoredFile } from "./images";
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
 
-/** On-disk format of a .goodnodes file. `scene` is Excalidraw's own JSON export. */
+/**
+ * On-disk format of a .goodnodes file. `scene` is Excalidraw's own JSON export,
+ * except that `scene.files` holds vault paths instead of dataURLs (see images.ts).
+ */
 interface CanvasFile {
 	type: "goodnodes";
 	version: 1;
 	background: BackgroundSettings;
 	viewport: Viewport;
-	scene: unknown;
+	scene: { elements?: unknown[]; appState?: Record<string, unknown>; files?: Record<string, StoredFile> } & Record<string, unknown>;
 }
 
 export function emptyCanvasFile(): string {
@@ -32,7 +36,7 @@ export function emptyCanvasFile(): string {
 		viewport: { scrollX: 0, scrollY: 0, zoom: 1 },
 		scene: { type: "excalidraw", version: 2, elements: [], appState: {}, files: {} },
 	};
-	return JSON.stringify(file, null, "\t");
+	return JSON.stringify(file);
 }
 
 function parseCanvasFile(data: string): CanvasFile {
@@ -47,12 +51,20 @@ function parseCanvasFile(data: string): CanvasFile {
 	};
 }
 
+/** Restore a scene from disk; vault-backed images are loaded separately. */
+function restoreScene(scene: CanvasFile["scene"]) {
+	const embedded: Record<string, StoredFile> = {};
+	for (const [id, f] of Object.entries(scene.files ?? {})) if (f.dataURL) embedded[id] = f;
+	return restore({ ...scene, files: embedded } as Parameters<typeof restore>[0], null, null);
+}
+
 export class CanvasView extends TextFileView {
 	private root: Root | null = null;
 	private api: ExcalidrawImperativeAPI | null = null;
 	private hostEl: HTMLElement | null = null;
 	private gestures: TouchGestures | null = null;
 	private bg: BackgroundLayer | null = null;
+	private images: CanvasImages;
 	private background: BackgroundSettings = { ...DEFAULT_BACKGROUND };
 	private viewport: Viewport = { scrollX: 0, scrollY: 0, zoom: 1 };
 	/** Raw text last loaded from or written to disk. */
@@ -62,12 +74,14 @@ export class CanvasView extends TextFileView {
 	private loading = false;
 	private unsubs: (() => void)[] = [];
 	private mountId = 0;
+	private fileCount = 0;
 
 	constructor(
 		leaf: WorkspaceLeaf,
 		private plugin: GoodNodesPlugin,
 	) {
 		super(leaf);
+		this.images = new CanvasImages(this.app, () => this.plugin.settings.imageFolder);
 	}
 
 	getViewType(): string {
@@ -97,6 +111,7 @@ export class CanvasView extends TextFileView {
 		if (!this.api) return this.lastData;
 		const elements = this.api.getSceneElementsIncludingDeleted();
 		const scene = JSON.parse(serializeAsJSON(elements, this.api.getAppState(), this.api.getFiles(), "local"));
+		scene.files = this.images.toStored(scene.files);
 		const file: CanvasFile = { type: "goodnodes", version: 1, background: this.background, viewport: this.viewport, scene };
 		const data = JSON.stringify(file);
 		this.lastData = data;
@@ -119,7 +134,8 @@ export class CanvasView extends TextFileView {
 			return;
 		}
 		this.lastData = data;
-		this.mount(parsed);
+		if (!clear && this.api) this.reloadInPlace(parsed);
+		else this.mount(parsed);
 	}
 
 	clear(): void {
@@ -134,8 +150,9 @@ export class CanvasView extends TextFileView {
 		const mountId = ++this.mountId;
 		this.background = file.background;
 		this.viewport = file.viewport;
+		this.images.reset(file.scene.files);
 
-		const restored = restore(file.scene as Parameters<typeof restore>[0], null, null);
+		const restored = restoreScene(file.scene);
 		const initialData: ExcalidrawInitialDataState = {
 			elements: restored.elements,
 			files: restored.files,
@@ -161,6 +178,7 @@ export class CanvasView extends TextFileView {
 		this.gestures = new TouchGestures(host, {
 			getViewport: () => this.viewport,
 			setViewport: (v) => this.applyViewport(v),
+			maxTouchSize: () => this.plugin.settings.palmMaxTouchSize,
 		});
 
 		this.root = createRoot(excalidrawEl);
@@ -172,11 +190,31 @@ export class CanvasView extends TextFileView {
 					background={this.background}
 					onBackground={(b) => this.setBackground(b)}
 					onApi={(api) => {
-						if (mountId === this.mountId) this.onApi(api);
+						if (mountId === this.mountId) this.onApi(api, file);
 					}}
 				/>
 			</StrictMode>,
 		);
+	}
+
+	/** Apply a newer version of the file (e.g. from sync) without remounting. */
+	private reloadInPlace(file: CanvasFile): void {
+		const api = this.api;
+		if (!api) return;
+		this.loading = true;
+		this.background = file.background;
+		this.bg?.setSettings(file.background);
+		this.images.reset(file.scene.files);
+		const restored = restoreScene(file.scene);
+		api.updateScene({ elements: restored.elements, captureUpdate: CaptureUpdateAction.NEVER });
+		const embedded = Object.values(restored.files);
+		if (embedded.length) api.addFiles(embedded);
+		void this.images.load(file.scene.files).then((files) => files.length && this.api === api && api.addFiles(files));
+		requestAnimationFrame(() => {
+			this.savedVersion = this.currentVersion();
+			this.loading = false;
+			debug.log("canvas reloaded from disk");
+		});
 	}
 
 	private unmount(): void {
@@ -193,7 +231,7 @@ export class CanvasView extends TextFileView {
 		this.hostEl = null;
 	}
 
-	private onApi(api: ExcalidrawImperativeAPI): void {
+	private onApi(api: ExcalidrawImperativeAPI, file: CanvasFile): void {
 		if (this.api === api) return;
 		this.api = api;
 		this.unsubs.push(
@@ -201,29 +239,53 @@ export class CanvasView extends TextFileView {
 				this.viewport = { scrollX, scrollY, zoom: zoom.value };
 				this.bg?.setViewport(this.viewport);
 			}),
-			api.onChange((elements) => {
+			api.onChange((elements, _appState, files) => {
 				if (this.loading) return;
 				if (this.currentVersion(elements) !== this.savedVersion) this.requestSave();
+				const count = Object.keys(files).length;
+				if (count !== this.fileCount) {
+					this.fileCount = count;
+					this.storeNewImages();
+				}
 			}),
 			api.onPointerUp((activeTool) => {
 				if (activeTool.type !== "freedraw") return;
 				// Let Excalidraw finalize the element and record its history entry first.
 				setTimeout(() => {
 					if (this.api !== api) return;
+					const s = this.plugin.settings;
 					try {
-						handleFinishedStroke(api, { enabled: true, includeText: true });
+						handleFinishedStroke(api, {
+							enabled: s.scratchEnabled,
+							includeText: s.scratchText,
+							minReversals: s.scratchMinReversals,
+							coverage: s.scratchCoverage,
+						});
 					} catch (e) {
 						debug.error("scratch-out failed", e);
 					}
 				}, 0);
 			}),
 		);
+		void this.images.load(file.scene.files).then((files) => {
+			if (files.length && this.api === api) api.addFiles(files);
+		});
 		// The initial scene is not an unsaved change.
 		requestAnimationFrame(() => {
 			if (api.getAppState().activeTool.type === "selection") api.setActiveTool({ type: "freedraw" });
+			this.fileCount = Object.keys(api.getFiles()).length;
 			this.savedVersion = this.currentVersion();
 			this.loading = false;
 			debug.log(`canvas ready: ${api.getSceneElements().length} elements`);
+		});
+	}
+
+	private storeNewImages(): void {
+		const api = this.api;
+		const file = this.file;
+		if (!api || !file) return;
+		void this.images.persistNew(api.getFiles(), file).then((wrote) => {
+			if (wrote) this.requestSave();
 		});
 	}
 
@@ -261,11 +323,30 @@ export class CanvasView extends TextFileView {
 
 // ---- React side ----
 
-const BACKGROUNDS: { kind: BackgroundKind; label: string; icon: string }[] = [
-	{ kind: "blank", label: "Blank", icon: "▢" },
-	{ kind: "grid", label: "Grid", icon: "▦" },
-	{ kind: "dots", label: "Dots", icon: "⠿" },
+const BACKGROUNDS: { kind: BackgroundKind; label: string }[] = [
+	{ kind: "blank", label: "Blank" },
+	{ kind: "grid", label: "Grid" },
+	{ kind: "dots", label: "Dots" },
 ];
+
+const SIZES: { size: number; label: string }[] = [
+	{ size: 16, label: "S" },
+	{ size: 24, label: "M" },
+	{ size: 40, label: "L" },
+];
+
+function BackgroundIcon({ kind }: { kind: BackgroundKind }) {
+	return (
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5">
+			<rect x="2.5" y="2.5" width="15" height="15" rx="3" />
+			{kind === "grid" && <path d="M7.5 2.5v15M12.5 2.5v15M2.5 7.5h15M2.5 12.5h15" strokeWidth="1" />}
+			{kind === "dots" &&
+				[6.5, 10, 13.5].flatMap((x) =>
+					[6.5, 10, 13.5].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="0.9" fill="currentColor" stroke="none" />),
+				)}
+		</svg>
+	);
+}
 
 function CanvasApp(props: {
 	initialData: ExcalidrawInitialDataState;
@@ -276,10 +357,9 @@ function CanvasApp(props: {
 }) {
 	const [background, setBackground] = useState(props.background);
 	const [open, setOpen] = useState(false);
-	const pick = (kind: BackgroundKind) => {
-		const next = { ...background, kind };
+	const update = (patch: Partial<BackgroundSettings>) => {
+		const next = { ...background, ...patch };
 		setBackground(next);
-		setOpen(false);
 		props.onBackground(next);
 	};
 	return (
@@ -289,15 +369,25 @@ function CanvasApp(props: {
 			theme={props.theme}
 			handleKeyboardGlobally={false}
 			autoFocus={false}
+			UIOptions={{
+				canvasActions: {
+					// The file is managed by Obsidian; the paper is our background layer.
+					loadScene: false,
+					saveToActiveFile: false,
+					export: false,
+					changeViewBackgroundColor: false,
+					toggleTheme: false,
+				},
+			}}
 			renderTopRightUI={() => (
 				<div className="goodnodes-bg-picker">
 					<button
 						className="goodnodes-bg-button"
-						title="Background"
-						aria-label="Background"
+						title="Paper background"
+						aria-label="Paper background"
 						onClick={() => setOpen(!open)}
 					>
-						{BACKGROUNDS.find((b) => b.kind === background.kind)?.icon}
+						<BackgroundIcon kind={background.kind} />
 					</button>
 					{open && (
 						<div className="goodnodes-bg-menu">
@@ -305,11 +395,25 @@ function CanvasApp(props: {
 								<button
 									key={b.kind}
 									className={b.kind === background.kind ? "is-active" : ""}
-									onClick={() => pick(b.kind)}
+									onClick={() => update({ kind: b.kind })}
 								>
-									<span>{b.icon}</span> {b.label}
+									<BackgroundIcon kind={b.kind} /> {b.label}
 								</button>
 							))}
+							{background.kind !== "blank" && (
+								<div className="goodnodes-bg-sizes">
+									{SIZES.map((s) => (
+										<button
+											key={s.size}
+											className={s.size === background.size ? "is-active" : ""}
+											title={`Spacing ${s.size}`}
+											onClick={() => update({ size: s.size })}
+										>
+											{s.label}
+										</button>
+									))}
+								</div>
+							)}
 						</div>
 					)}
 				</div>
@@ -317,6 +421,3 @@ function CanvasApp(props: {
 		/>
 	);
 }
-
-// Silence "unused" for BinaryFiles until image-to-vault storage lands (M1).
-export type { BinaryFiles };
