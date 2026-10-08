@@ -5,6 +5,7 @@ import { CaptureUpdateAction, Excalidraw, getSceneVersion, restore, serializeAsJ
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import "@excalidraw/excalidraw/index.css";
+import "./canvas.css";
 import type GoodNodesPlugin from "../main";
 import { debug } from "../debug";
 import { BackgroundLayer, DEFAULT_BACKGROUND, type BackgroundKind, type BackgroundSettings } from "./background";

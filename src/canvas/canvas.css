@@ -1,0 +1,61 @@
+/* ---------- canvas view ---------- */
+.goodnodes-canvas-view {
+	padding: 0 !important;
+	overflow: hidden;
+}
+.goodnodes-canvas-host {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: #fff;
+	/* Fingers are handled by our gesture layer; stop WebKit panning/zooming the page. */
+	touch-action: none;
+	-webkit-user-select: none;
+	user-select: none;
+}
+.theme-dark .goodnodes-canvas-host { background: #1e1e1e; }
+.goodnodes-canvas-bg,
+.goodnodes-canvas-excalidraw {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+.goodnodes-canvas-bg { pointer-events: none; }
+.goodnodes-canvas-excalidraw .excalidraw { --zIndex-layerUI: 4; }
+/* Obsidian's global button styles leak into Excalidraw. */
+.goodnodes-canvas-excalidraw .excalidraw button { box-shadow: none; }
+
+.goodnodes-bg-picker { position: relative; }
+.goodnodes-bg-button {
+	width: 2.25rem;
+	height: 2.25rem;
+	padding: 0;
+	font-size: 18px;
+	border-radius: var(--border-radius-lg, 8px);
+	background: var(--island-bg-color, var(--background-primary));
+	box-shadow: var(--shadow-island, none) !important;
+	color: var(--icon-fill-color, var(--text-normal));
+}
+.goodnodes-bg-menu {
+	position: absolute;
+	right: 0;
+	top: calc(100% + 6px);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px;
+	min-width: 120px;
+	border-radius: 8px;
+	background: var(--island-bg-color, var(--background-primary));
+	box-shadow: var(--shadow-island, 0 2px 10px rgba(0, 0, 0, 0.2));
+	z-index: 10;
+}
+.goodnodes-bg-menu button {
+	justify-content: flex-start;
+	gap: 8px;
+	background: transparent;
+	color: var(--text-color-primary, var(--text-normal));
+}
+.goodnodes-bg-menu button.is-active { background: var(--color-surface-primary-container, var(--background-modifier-hover)); }

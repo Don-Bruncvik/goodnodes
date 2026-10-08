@@ -2,11 +2,16 @@ import { FuzzySuggestModal, Plugin, TFile, TFolder, normalizePath } from "obsidi
 import { debug, DebugPanel } from "./debug";
 import { CANVAS_EXTENSION, CANVAS_VIEW_TYPE, CanvasView, emptyCanvasFile } from "./canvas/CanvasView";
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
+import { DEFAULT_SETTINGS, GoodNodesSettingTab, type GoodNodesSettings } from "./settings";
 
 export default class GoodNodesPlugin extends Plugin {
 	debugPanel = new DebugPanel();
+	settings: GoodNodesSettings = { ...DEFAULT_SETTINGS };
+	private debugRibbon: HTMLElement | null = null;
 
 	async onload(): Promise<void> {
+		this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<GoodNodesSettings> | null) };
+		this.addSettingTab(new GoodNodesSettingTab(this.app, this));
 		debug.log(`GoodNodes ${this.manifest.version} loaded, UA: ${navigator.userAgent}`);
 		window.addEventListener("error", this.onWindowError);
 		window.addEventListener("unhandledrejection", this.onUnhandledRejection);
@@ -14,10 +19,17 @@ export default class GoodNodesPlugin extends Plugin {
 		this.registerView(CANVAS_VIEW_TYPE, (leaf) => new CanvasView(leaf, this));
 		this.registerExtensions([CANVAS_EXTENSION], CANVAS_VIEW_TYPE);
 		this.registerView(PDF_VIEW_TYPE, (leaf) => new PdfNotebookView(leaf, this));
+		if (this.settings.openPdfByDefault) {
+			try {
+				this.registerExtensions(["pdf"], PDF_VIEW_TYPE);
+			} catch (e) {
+				debug.error("could not take over .pdf files", e);
+			}
+		}
 
 		this.addRibbonIcon("pencil", "New GoodNodes canvas", () => void this.createCanvas());
 		this.addRibbonIcon("book-open", "Open PDF as GoodNodes notebook", () => new PdfPickerModal(this).open());
-		this.addRibbonIcon("bug", "GoodNodes debug panel", () => this.debugPanel.toggle());
+		this.updateDebugRibbon();
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
@@ -38,6 +50,20 @@ export default class GoodNodesPlugin extends Plugin {
 		this.debugPanel.close();
 		window.removeEventListener("error", this.onWindowError);
 		window.removeEventListener("unhandledrejection", this.onUnhandledRejection);
+	}
+
+	async saveSettings(): Promise<void> {
+		await this.saveData(this.settings);
+	}
+
+	updateDebugRibbon(): void {
+		if (this.settings.showDebugRibbon && !this.debugRibbon) {
+			this.debugRibbon = this.addRibbonIcon("bug", "GoodNodes debug panel", () => this.debugPanel.toggle());
+		} else if (!this.settings.showDebugRibbon && this.debugRibbon) {
+			this.debugRibbon.remove();
+			this.debugRibbon = null;
+			this.debugPanel.close();
+		}
 	}
 
 	private onWindowError = (e: ErrorEvent) => debug.error("window error", e.error ?? e.message);

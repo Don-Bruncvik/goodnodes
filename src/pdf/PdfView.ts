@@ -2,6 +2,7 @@ import { App, FileView, loadPdfJs, Modal, TFile, WorkspaceLeaf } from "obsidian"
 import { getStroke } from "perfect-freehand";
 import type GoodNodesPlugin from "../main";
 import { debug } from "../debug";
+import "./pdf.css";
 
 export const PDF_VIEW_TYPE = "goodnodes-pdf";
 type PdfDoc = any;
