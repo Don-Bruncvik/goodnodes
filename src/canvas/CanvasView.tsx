@@ -12,6 +12,7 @@ import { BackgroundLayer, DEFAULT_BACKGROUND, type BackgroundKind, type Backgrou
 import { TouchGestures, type Viewport } from "./touch";
 import { handleFinishedStroke } from "./scratch";
 import { CanvasImages, type StoredFile } from "./images";
+import { PenPopover, type PenChoice } from "./penPopover";
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
@@ -79,6 +80,9 @@ export class CanvasView extends TextFileView {
 	private unsubs: (() => void)[] = [];
 	private mountId = 0;
 	private fileCount = 0;
+	private penPopover: PenPopover | null = null;
+	private activeTool = "";
+	private savePenTimer = 0;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -195,6 +199,9 @@ export class CanvasView extends TextFileView {
 				penDetected: true,
 				// Opening a notebook should be ready to write.
 				activeTool: { type: "freedraw", customType: null, locked: false, lastActiveTool: null },
+				currentItemStrokeColor: this.plugin.settings.canvasPenColor,
+				currentItemStrokeWidth: this.plugin.settings.canvasPenWidth,
+				currentItemOpacity: 100,
 				scrollX: this.viewport.scrollX,
 				scrollY: this.viewport.scrollY,
 				zoom: { value: this.viewport.zoom as AppState["zoom"]["value"] },
@@ -203,6 +210,24 @@ export class CanvasView extends TextFileView {
 		};
 
 		const host = this.contentEl.createDiv({ cls: "goodnodes-canvas-host" });
+		host.dataset.tool = "freedraw";
+		this.penPopover = new PenPopover(
+			host,
+			() => ({ color: this.plugin.settings.canvasPenColor, width: this.plugin.settings.canvasPenWidth }),
+			(choice) => this.setPen(choice),
+		);
+		// Tapping the pen while it is already the active tool opens the pen popover.
+		// Capture phase: runs before Excalidraw handles the click (and re-selects the tool).
+		host.addEventListener(
+			"click",
+			(e) => {
+				const button = (e.target as Element | null)?.closest?.<HTMLElement>('[data-testid="toolbar-freedraw"]');
+				if (!button) return;
+				const wasActive = this.api?.getAppState().activeTool.type === "freedraw";
+				if (wasActive) setTimeout(() => this.penPopover?.toggle(button), 0);
+			},
+			true,
+		);
 		this.hostEl = host;
 		this.bg = new BackgroundLayer(host, this.background, this.isDark());
 		this.bg.setViewport(this.viewport);
@@ -252,6 +277,8 @@ export class CanvasView extends TextFileView {
 	}
 
 	private unmount(): void {
+		this.penPopover?.close();
+		this.penPopover = null;
 		for (const u of this.unsubs) u();
 		this.unsubs = [];
 		this.gestures?.destroy();
@@ -273,7 +300,8 @@ export class CanvasView extends TextFileView {
 				this.viewport = { scrollX, scrollY, zoom: zoom.value };
 				this.bg?.setViewport(this.viewport);
 			}),
-			api.onChange((elements, _appState, files) => {
+			api.onChange((elements, appState, files) => {
+				this.onToolChange(appState.activeTool.type);
 				if (this.loading) return;
 				if (this.currentVersion(elements) !== this.savedVersion) this.requestSave();
 				const count = Object.keys(files).length;
@@ -312,6 +340,38 @@ export class CanvasView extends TextFileView {
 			this.loading = false;
 			debug.log(`canvas ready: ${api.getSceneElements().length} elements`);
 		});
+	}
+
+	/** The pen keeps its own color/width even though Excalidraw shares them across tools. */
+	private onToolChange(tool: string): void {
+		if (tool === this.activeTool) return;
+		this.activeTool = tool;
+		if (this.hostEl) this.hostEl.dataset.tool = tool;
+		if (tool !== "freedraw") this.penPopover?.close();
+		else this.applyPen();
+	}
+
+	private applyPen(): void {
+		const s = this.plugin.settings;
+		const st = this.api?.getAppState();
+		if (!st || (st.currentItemStrokeColor === s.canvasPenColor && st.currentItemStrokeWidth === s.canvasPenWidth))
+			return;
+		this.api?.updateScene({
+			appState: {
+				currentItemStrokeColor: s.canvasPenColor,
+				currentItemStrokeWidth: s.canvasPenWidth,
+				currentItemOpacity: 100,
+			},
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
+	}
+
+	private setPen(choice: PenChoice): void {
+		this.plugin.settings.canvasPenColor = choice.color;
+		this.plugin.settings.canvasPenWidth = choice.width;
+		this.applyPen();
+		window.clearTimeout(this.savePenTimer);
+		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
 	}
 
 	private storeNewImages(): void {
