@@ -27,7 +27,18 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 			view: {
 				page: clamp(Math.floor(raw.view.page ?? 0), 0, Math.max(0, pageCount - 1)),
 				zoom: clamp(raw.view.zoom ?? 1, 0.5, 4),
+				sidebar:
+					raw.view.sidebar === "pages" || raw.view.sidebar === "outline" || raw.view.sidebar === "bookmarks"
+						? raw.view.sidebar
+						: null,
 			},
+			bookmarks: [
+				...new Set(
+					(Array.isArray(raw.bookmarks) ? raw.bookmarks : []).filter(
+						(page) => Number.isInteger(page) && page >= 0 && page < pageCount,
+					),
+				),
+			].sort((a, b) => a - b),
 			pages,
 		};
 	} catch {
@@ -44,7 +55,10 @@ export function serializeSidecar(data: PdfSidecar): string {
 				points: stroke.points.map(([x, y, pressure]) => [round(x), round(y), clampPressure(pressure)]),
 			}));
 	}
-	return JSON.stringify({ ...data, pages });
+	const bookmarks = [...new Set(data.bookmarks.filter((page) => Number.isInteger(page) && page >= 0))].sort(
+		(a, b) => a - b,
+	);
+	return JSON.stringify({ ...data, bookmarks, pages });
 }
 
 function isStroke(value: unknown): value is InkStroke {

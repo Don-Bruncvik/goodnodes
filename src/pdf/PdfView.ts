@@ -1,4 +1,4 @@
-import { App, FileView, loadPdfJs, Modal, Notice, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, loadPdfJs, Menu, Modal, Notice, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { getStroke } from "perfect-freehand";
 import { findScratchedStrokes } from "../scratch/detect";
 import type GoodNodesPlugin from "../main";
@@ -47,8 +47,21 @@ type Gesture = {
 	visualScale: number;
 };
 type SessionTool = { tool: Tool; color: string; width: number };
-const PRESET_COLORS = ["#1e1e1e", "#1971c2", "#e03131", "#2f9e44", "#f08c00", "#9c36b5"];
-let sessionTool: SessionTool | null = null;
+type SidebarTab = "pages" | "outline" | "bookmarks";
+const PEN_COLORS = [
+	"#1e1e1e",
+	"#5c5f66",
+	"#1971c2",
+	"#0c8599",
+	"#2f9e44",
+	"#f08c00",
+	"#e03131",
+	"#c2255c",
+	"#9c36b5",
+	"#ffffff",
+];
+const HIGHLIGHTER_COLORS = ["#ffd43b", "#69db7c", "#74c0fc", "#faa2c1", "#ffa94d", "#b197fc"];
+let sessionTool: Tool = "pen";
 
 export class PdfNotebookView extends FileView {
 	navigation = true;
@@ -61,8 +74,22 @@ export class PdfNotebookView extends FileView {
 	private toolbar: HTMLElement;
 	private historyToolbar: HTMLElement;
 	private indicator: HTMLElement;
-	private outlineEl: HTMLElement | null = null;
-	private thumbPanel: HTMLElement | null = null;
+	private sidebar: HTMLElement | null = null;
+	private sidebarContent: HTMLElement | null = null;
+	private sidebarTab: SidebarTab = "pages";
+	private restoredSidebar: SidebarTab | null = null;
+	private popover: HTMLElement | null = null;
+	private settingsTimer: number | null = null;
+	private bookmarks = new Set<number>();
+	private scrubber: HTMLElement;
+	private scrubberThumb: HTMLElement;
+	private scrubberBubble: HTMLElement;
+	private scrubberTimer: number | null = null;
+	private scrubberRaf = 0;
+	private scrubberDragging = false;
+	private scrubberPointer = 0;
+	private scrubberPendingY = 0;
+	private outlineItems: { row: HTMLElement; page: number | null }[] = [];
 	private observer: IntersectionObserver | null = null;
 	private thumbObserver: IntersectionObserver | null = null;
 	private slots: PageSlot[] = [];
@@ -105,20 +132,35 @@ export class PdfNotebookView extends FileView {
 	constructor(leaf: WorkspaceLeaf, plugin: GoodNodesPlugin) {
 		super(leaf);
 		this.plugin = plugin;
-		this.toolState = sessionTool ?? {
-			tool: "pen",
+		this.toolState = {
+			tool: sessionTool,
 			color: plugin.settings.penColor,
 			width: plugin.settings.penWidth,
 		};
 		this.contentEl.addClass("goodnodes-pdf-root");
 		this.scroller = this.contentEl.createDiv({ cls: "goodnodes-pdf-scroll" });
+		// Obsidian doesn't call onResize for every size change (window resize, iPad rotation,
+		// split view, our own sidebar), so watch the scroller directly.
+		const resizeObserver = new ResizeObserver(() => requestAnimationFrame(() => this.onResize()));
+		resizeObserver.observe(this.scroller);
+		this.register(() => resizeObserver.disconnect());
 		this.pagesEl = this.scroller.createDiv({ cls: "goodnodes-pdf-pages" });
 		this.historyToolbar = this.contentEl.createDiv({ cls: "goodnodes-pdf-history" });
 		this.toolbar = this.contentEl.createDiv({ cls: "goodnodes-pdf-toolbar" });
 		this.indicator = this.contentEl.createDiv({ cls: "goodnodes-pdf-indicator", text: "— / —" });
+		this.scrubber = this.contentEl.createDiv({ cls: "goodnodes-pdf-scrubber" });
+		this.scrubberThumb = this.scrubber.createDiv({ cls: "goodnodes-pdf-scrubber-thumb" });
+		this.scrubberBubble = this.scrubber.createDiv({ cls: "goodnodes-pdf-scrubber-bubble" });
 		this.buildToolbar();
-		this.registerDomEvent(this.scroller, "scroll", () => this.scheduleUpdate());
+		this.registerDomEvent(this.scroller, "scroll", () => {
+			this.scheduleUpdate();
+			this.showScrubber();
+		});
 		this.registerDomEvent(this.indicator, "click", () => this.openPageModal());
+		this.registerDomEvent(this.scrubber, "pointerdown", (e) => this.scrubberDown(e));
+		this.registerDomEvent(this.scrubber, "pointermove", (e) => this.scrubberMove(e));
+		this.registerDomEvent(this.scrubber, "pointerup", (e) => this.scrubberUp(e));
+		this.registerDomEvent(this.scrubber, "pointercancel", (e) => this.scrubberUp(e));
 		this.registerDomEvent(this.pagesEl, "pointerdown", (e) => this.pointerDown(e));
 		this.registerDomEvent(this.pagesEl, "pointermove", (e) => this.pointerMove(e));
 		this.registerDomEvent(this.pagesEl, "pointerup", (e) => this.pointerUp(e));
@@ -199,6 +241,11 @@ export class PdfNotebookView extends FileView {
 			await this.loadSidecar(file, file.stat.size);
 			if (stale()) return;
 			this.buildSlots();
+			if (this.restoredSidebar) {
+				const tab = this.restoredSidebar;
+				this.restoredSidebar = null;
+				this.toggleSidebar(tab);
+			}
 			// Refit once the page list exists: a vertical scrollbar may have taken some width.
 			requestAnimationFrame(() => this.onResize());
 			this.observe();
@@ -221,57 +268,18 @@ export class PdfNotebookView extends FileView {
 	private buildToolbar(): void {
 		this.iconButton(this.historyToolbar, "undo-2", "Undo", () => this.undo());
 		this.iconButton(this.historyToolbar, "redo-2", "Redo", () => this.redo());
+		this.iconButton(this.toolbar, "panel-left", "Pages sidebar", () => this.toggleSidebar());
+		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
 		this.toolButton("pen", "pen-line", "Pen");
 		this.toolButton("highlighter", "highlighter", "Highlighter");
 		this.toolButton("eraser", "eraser", "Eraser");
 		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
-		this.renderColorSwatches();
-		for (const width of [1, this.plugin.settings.penWidth, this.plugin.settings.penWidth * 2.5]) {
-			const button = this.toolbar.createEl("button", {
-				cls: "goodnodes-pdf-width",
-				attr: { title: `Width ${width}` },
-			});
-			button.dataset.width = String(width);
-			button.createSpan({ cls: "goodnodes-pdf-width-dot" }).style.width = `${Math.min(18, 4 + width * 2)}px`;
-			button.createSpan({ cls: "goodnodes-pdf-width-dot" }).style.height = `${Math.min(18, 4 + width * 2)}px`;
-			button.onclick = () => {
-				this.toolState.width = width;
-				this.updateToolbar();
-				this.rememberTool();
-			};
-		}
-		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
-		// Zoom buttons are for mouse users; on narrow (touch) layouts CSS hides them, pinch is there.
-		this.iconButton(
-			this.toolbar,
-			"zoom-out",
-			"Zoom out",
-			() => this.setZoom(this.zoom / 1.2),
-			"goodnodes-pdf-zoom",
+		const bookmark = this.iconButton(this.toolbar, "bookmark", "Bookmark page", () =>
+			this.toggleBookmark(this.currentPage),
 		);
-		this.iconButton(this.toolbar, "zoom-in", "Zoom in", () => this.setZoom(this.zoom * 1.2), "goodnodes-pdf-zoom");
-		this.iconButton(this.toolbar, "maximize", "Fit width", () => this.setZoom(1));
-		this.iconButton(this.toolbar, "list", "Outline", () => this.toggleOutline());
-		this.iconButton(this.toolbar, "layout-grid", "Thumbnails", () => this.toggleThumbnails());
-		this.iconButton(this.toolbar, "file-down", "Export PDF with notes", () => void this.exportAnnotated());
+		bookmark.dataset.action = "bookmark";
+		this.iconButton(this.toolbar, "more-horizontal", "More", (event?: MouseEvent) => this.showMore(event));
 		this.updateToolbar();
-	}
-
-	private renderColorSwatches(): void {
-		const settingColor =
-			this.toolState.tool === "highlighter"
-				? this.plugin.settings.highlighterColor
-				: this.plugin.settings.penColor;
-		const colors = [...new Set([settingColor.toLowerCase(), ...PRESET_COLORS])];
-		for (const color of colors) {
-			const button = this.toolbar.createEl("button", { cls: "goodnodes-pdf-swatch", attr: { title: color } });
-			button.style.setProperty("--goodnodes-swatch", color);
-			button.onclick = () => {
-				this.toolState.color = color;
-				this.updateToolbar();
-				this.rememberTool();
-			};
-		}
 	}
 
 	private toolButton(tool: Tool, icon: string, label: string): void {
@@ -282,37 +290,202 @@ export class PdfNotebookView extends FileView {
 		setIcon(button, icon);
 		button.dataset.tool = tool;
 		button.onclick = () => {
-			this.toolState.tool = tool;
-			if (tool === "highlighter") this.toolState.color = this.plugin.settings.highlighterColor;
-			this.updateToolbar();
-			this.rememberTool();
+			if (this.toolState.tool === tool) this.openToolPopover(button, tool);
+			else {
+				this.closePopover();
+				this.selectTool(tool);
+			}
 		};
 	}
 
-	private iconButton(parent: HTMLElement, icon: string, title: string, action: () => void, cls?: string): void {
+	private iconButton(
+		parent: HTMLElement,
+		icon: string,
+		title: string,
+		action: (event?: MouseEvent) => void,
+		cls?: string,
+	): HTMLButtonElement {
 		const button = parent.createEl("button", { cls, attr: { title, "aria-label": title } });
 		setIcon(button, icon);
-		button.onclick = action;
+		button.onclick = (event) => action(event);
+		return button;
 	}
 
 	private updateToolbar(): void {
 		this.toolbar
 			.querySelectorAll<HTMLElement>("[data-tool]")
 			.forEach((button) => button.toggleClass("is-active", button.dataset.tool === this.toolState.tool));
-		this.toolbar
-			.querySelectorAll<HTMLElement>(".goodnodes-pdf-swatch")
-			.forEach((button) =>
-				button.toggleClass("is-active", button.title.toLowerCase() === this.toolState.color.toLowerCase()),
-			);
-		this.toolbar
-			.querySelectorAll<HTMLElement>(".goodnodes-pdf-width")
-			.forEach((button) =>
-				button.toggleClass("is-active", Number(button.dataset.width) === this.toolState.width),
-			);
+		for (const tool of ["pen", "highlighter"] as const) {
+			const button = this.toolbar.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+			if (!button) continue;
+			const color = tool === "pen" ? this.plugin.settings.penColor : this.plugin.settings.highlighterColor;
+			button.style.setProperty("--goodnodes-tool-color", color);
+			button.toggleClass("has-color", true);
+		}
+		const bookmark = this.toolbar.querySelector<HTMLElement>('[data-action="bookmark"]');
+		if (bookmark) {
+			const active = this.bookmarks.has(this.currentPage);
+			bookmark.toggleClass("is-bookmarked", active);
+			bookmark.setAttribute("aria-label", active ? "Remove bookmark" : "Bookmark page");
+			bookmark.setAttribute("title", active ? "Remove bookmark" : "Bookmark page");
+			setIcon(bookmark, active ? "bookmark-check" : "bookmark");
+		}
 	}
 
-	private rememberTool(): void {
-		sessionTool = { ...this.toolState };
+	private selectTool(tool: Tool): void {
+		sessionTool = tool;
+		this.toolState.tool = tool;
+		this.toolState.color =
+			tool === "highlighter" ? this.plugin.settings.highlighterColor : this.plugin.settings.penColor;
+		this.toolState.width =
+			tool === "highlighter" ? this.plugin.settings.highlighterWidth : this.plugin.settings.penWidth;
+		this.updateToolbar();
+	}
+
+	private showMore(event?: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle("Zoom in")
+				.setIcon("zoom-in")
+				.onClick(() => this.setZoom(this.zoom * 1.2)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Zoom out")
+				.setIcon("zoom-out")
+				.onClick(() => this.setZoom(this.zoom / 1.2)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Fit width")
+				.setIcon("maximize")
+				.onClick(() => this.setZoom(1)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Go to page…")
+				.setIcon("file-search")
+				.onClick(() => this.openPageModal()),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Export PDF with notes")
+				.setIcon("file-down")
+				.onClick(() => void this.exportAnnotated()),
+		);
+		if (event) menu.showAtMouseEvent(event);
+		else
+			menu.showAtPosition({
+				x: this.toolbar.getBoundingClientRect().right,
+				y: this.toolbar.getBoundingClientRect().bottom,
+			});
+	}
+
+	private openToolPopover(anchor: HTMLElement, tool: Tool): void {
+		this.closePopover();
+		const popover = this.contentEl.createDiv({ cls: `goodnodes-pdf-popover goodnodes-pdf-popover-${tool}` });
+		this.popover = popover;
+		const settings = this.plugin.settings;
+		const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
+		if (tool !== "eraser") {
+			const row = popover.createDiv({ cls: "goodnodes-pdf-popover-colors" });
+			for (const color of [...colors, "custom"]) {
+				const current = tool === "highlighter" ? settings.highlighterColor : settings.penColor;
+				const swatch = row.createEl("button", {
+					cls: "goodnodes-pdf-swatch",
+					attr: { title: color === "custom" ? "Custom color" : color },
+				});
+				if (color === "custom") {
+					swatch.addClass("is-custom");
+					const input = swatch.createEl("input", { attr: { type: "color", value: current } });
+					input.oninput = () => this.applyToolColor(tool, input.value);
+				} else swatch.style.setProperty("--goodnodes-swatch", color);
+				swatch.toggleClass("is-active", color === current.toLowerCase());
+				if (color !== "custom") swatch.onclick = () => this.applyToolColor(tool, color);
+			}
+		}
+		const widths =
+			tool === "highlighter" ? [1.6, 2.4, 3.6] : tool === "eraser" ? [6, 10, 16] : [0.8, 1.4, 2, 3, 4.5];
+		const widthRow = popover.createDiv({ cls: "goodnodes-pdf-popover-widths" });
+		const currentWidth =
+			tool === "eraser"
+				? settings.eraserSize
+				: tool === "highlighter"
+					? settings.highlighterWidth
+					: settings.penWidth;
+		for (const width of widths) {
+			const button = widthRow.createEl("button", {
+				attr: { title: tool === "eraser" ? `${width}px radius` : `${width} pt` },
+			});
+			button.toggleClass("is-active", width === currentWidth);
+			const sample = button.createSpan({ cls: "goodnodes-pdf-width-sample" });
+			sample.style.setProperty(
+				"--goodnodes-sample-width",
+				`${Math.min(18, tool === "eraser" ? width : width * 2)}px`,
+			);
+			sample.style.setProperty(
+				"--goodnodes-tool-color",
+				tool === "highlighter" ? settings.highlighterColor : settings.penColor,
+			);
+			button.onclick = () => this.applyToolWidth(tool, width);
+		}
+		const rect = anchor.getBoundingClientRect();
+		popover.style.left = `${Math.max(8, Math.min(window.innerWidth - popover.offsetWidth - 8, rect.left + rect.width / 2 - popover.offsetWidth / 2))}px`;
+		popover.style.top = `${Math.max(8, Math.min(window.innerHeight - popover.offsetHeight - 8, rect.bottom + 8))}px`;
+		const outside = (event: PointerEvent) => {
+			if (!popover.contains(event.target as Node) && !anchor.contains(event.target as Node)) this.closePopover();
+		};
+		const escape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") this.closePopover();
+		};
+		window.addEventListener("pointerup", outside, true);
+		window.addEventListener("keydown", escape, true);
+		(popover as any).__cleanup = () => {
+			window.removeEventListener("pointerup", outside, true);
+			window.removeEventListener("keydown", escape, true);
+		};
+	}
+
+	private closePopover(): void {
+		if (!this.popover) return;
+		(this.popover as any).__cleanup?.();
+		this.popover.remove();
+		this.popover = null;
+	}
+
+	private applyToolColor(tool: InkTool, color: string): void {
+		if (tool === "highlighter") {
+			this.plugin.settings.highlighterColor = color;
+			this.toolState.color = color;
+		} else {
+			this.plugin.settings.penColor = color;
+			this.toolState.color = color;
+		}
+		this.updateToolbar();
+		this.scheduleSettingsSave();
+	}
+
+	private applyToolWidth(tool: Tool, width: number): void {
+		if (tool === "eraser") this.plugin.settings.eraserSize = width;
+		else if (tool === "highlighter") {
+			this.plugin.settings.highlighterWidth = width;
+			this.toolState.width = width;
+		} else {
+			this.plugin.settings.penWidth = width;
+			this.toolState.width = width;
+		}
+		this.scheduleSettingsSave();
+		const anchor = this.toolbar.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+		if (anchor) this.openToolPopover(anchor, tool);
+	}
+
+	private scheduleSettingsSave(): void {
+		if (this.settingsTimer !== null) window.clearTimeout(this.settingsTimer);
+		this.settingsTimer = window.setTimeout(async () => {
+			this.settingsTimer = null;
+			await this.plugin.saveSettings();
+		}, 300);
 	}
 
 	private fitScale(): number {
@@ -367,6 +540,9 @@ export class PdfNotebookView extends FileView {
 
 	private updateVisible(): void {
 		if (!this.doc || !this.slots.length) return;
+		// Hidden, detached or not yet laid out: positions are meaningless (would "jump" to a
+		// wrong page and save it), and a pending restore must win.
+		if (!this.scroller.isConnected || this.scroller.clientHeight === 0 || this.pendingRestore !== null) return;
 		const center = this.scroller.scrollTop + this.scroller.clientHeight / 2;
 		let current = 0,
 			best = Infinity;
@@ -377,10 +553,13 @@ export class PdfNotebookView extends FileView {
 				current = i;
 			}
 		});
-		if (this.currentPage !== current) this.markDirty();
+		const pageChanged = this.currentPage !== current;
+		if (pageChanged) this.markDirty();
 		this.currentPage = current;
 		this.indicator.setText(`${current + 1} / ${this.slots.length}`);
-		this.updateThumbnailSelection();
+		this.updateSidebarSelection();
+		if (pageChanged && this.sidebarTab === "pages") this.scrollSidebarToCurrent();
+		this.updateScrubber();
 		const selected = new Set<number>();
 		for (let i = Math.max(0, current - 2); i <= Math.min(this.slots.length - 1, current + 2); i++) selected.add(i);
 		this.visible = selected;
@@ -544,12 +723,78 @@ export class PdfNotebookView extends FileView {
 		this.markDirty();
 	}
 
+	private updateScrubber(): void {
+		const max = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
+		const fraction = this.scroller.scrollTop / max;
+		const available = Math.max(0, this.scrubber.clientHeight - this.scrubberThumb.offsetHeight);
+		const offset = fraction * available;
+		this.scrubberThumb.style.transform = `translateY(${offset}px)`;
+		this.scrubberBubble.style.transform = `translateY(${offset}px)`;
+		const page = this.currentPage + 1;
+		this.scrubberBubble.setText(`Page ${page} / ${this.slots.length}`);
+	}
+
+	private showScrubber(): void {
+		this.scrubber.addClass("is-visible");
+		if (this.scrubberTimer !== null) window.clearTimeout(this.scrubberTimer);
+		if (!this.scrubberDragging)
+			this.scrubberTimer = window.setTimeout(() => this.scrubber.removeClass("is-visible"), 1500);
+	}
+
+	private scrubberDown(event: PointerEvent): void {
+		if (!this.slots.length) return;
+		event.preventDefault();
+		event.stopPropagation();
+		this.scrubberPointer = event.pointerId;
+		this.scrubber.setPointerCapture(event.pointerId);
+		this.scrubberDragging = true;
+		this.scrubber.addClass("is-visible");
+		this.scrubberPendingY = event.clientY;
+		this.applyScrubberPosition(event.clientY);
+	}
+
+	private scrubberMove(event: PointerEvent): void {
+		if (!this.scrubberDragging || event.pointerId !== this.scrubberPointer) return;
+		event.preventDefault();
+		this.scrubberPendingY = event.clientY;
+		if (this.scrubberRaf) return;
+		this.scrubberRaf = requestAnimationFrame(() => {
+			this.scrubberRaf = 0;
+			this.applyScrubberPosition(this.scrubberPendingY);
+		});
+	}
+
+	private applyScrubberPosition(clientY: number): void {
+		const rect = this.scrubber.getBoundingClientRect();
+		const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+		this.scroller.scrollTop = ratio * (this.scroller.scrollHeight - this.scroller.clientHeight);
+		this.scrubberBubble.setText(`Page ${this.currentPage + 1} / ${this.slots.length}`);
+	}
+
+	private scrubberUp(event: PointerEvent): void {
+		if (!this.scrubberDragging || event.pointerId !== this.scrubberPointer) return;
+		this.scrubberDragging = false;
+		this.scrubberPointer = 0;
+		this.showScrubber();
+	}
+
 	/** Pages fit the view width at zoom 1; refit when the view is resized (rotation, sidebars). */
 	onResize(): void {
-		if (!this.doc || !this.slots.length) return;
+		if (!this.doc || !this.slots.length || this.scroller.clientWidth === 0) return;
 		const next = this.fitScale();
-		if (Math.abs(next - this.pageScale) < 0.001) return;
-		this.relayout(() => (this.pageScale = next));
+		if (Math.abs(next - this.pageScale) >= 0.001) {
+			if (this.pendingRestore !== null) {
+				// Nothing on screen to anchor yet: just rescale, the restore scrolls afterwards.
+				this.pageScale = next;
+				for (const slot of this.slots) {
+					slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
+					slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+				}
+			} else {
+				this.relayout(() => (this.pageScale = next));
+			}
+		}
+		this.applyPendingRestore();
 	}
 
 	/** Change page scale/zoom while keeping the content under (clientX, clientY) in place. */
@@ -718,7 +963,9 @@ export class PdfNotebookView extends FileView {
 
 	private commitEraser(page: number, points: InkPoint[]): void {
 		const existing = this.strokes.get(page) ?? [];
-		const ids = new Set(findEraserHits(points, existing, 8 / (this.pageScale * this.zoom)));
+		const ids = new Set(
+			findEraserHits(points, existing, this.plugin.settings.eraserSize / (this.pageScale * this.zoom)),
+		);
 		if (!ids.size) return;
 		const removed = existing.filter((stroke) => ids.has(stroke.id));
 		this.strokes.set(
@@ -763,7 +1010,13 @@ export class PdfNotebookView extends FileView {
 			const factor = canvas.width / (slot.width * scale);
 			const [displayX, displayY] = unrotatedToDisplayed(last[0], last[1], rotationInfo(slot));
 			ctx.beginPath();
-			ctx.arc(displayX * scale * factor, displayY * scale * factor, 8 * factor, 0, Math.PI * 2);
+			ctx.arc(
+				displayX * scale * factor,
+				displayY * scale * factor,
+				this.plugin.settings.eraserSize * factor,
+				0,
+				Math.PI * 2,
+			);
 			ctx.strokeStyle = "rgba(30,30,30,.65)";
 			ctx.lineWidth = 1.5 * factor;
 			ctx.stroke();
@@ -928,31 +1181,38 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async loadOutline(): Promise<void> {
-		if (!this.doc) return;
+		if (!this.doc || !this.sidebarContent) return;
 		try {
 			const outline = await this.doc.getOutline();
-			if (outline?.length) this.renderOutline(outline);
+			if (!this.sidebarContent || this.sidebarTab !== "outline") return;
+			this.sidebarContent.empty();
+			this.outlineItems = [];
+			if (!outline?.length) {
+				this.sidebarContent.createDiv({ cls: "goodnodes-pdf-empty", text: "This PDF has no outline" });
+				return;
+			}
+			const add = (item: any, depth: number) => {
+				const row = this.sidebarContent!.createDiv({ cls: "goodnodes-pdf-outline-item" });
+				row.createSpan({ text: item.title });
+				const pageLabel = row.createSpan({ cls: "goodnodes-pdf-outline-page" });
+				row.style.paddingLeft = `${12 + depth * 14}px`;
+				row.onclick = () => void this.outlineJump(item);
+				const record = { row, page: null as number | null };
+				this.outlineItems.push(record);
+				void this.outlinePage(item).then((page) => {
+					if (page !== null) {
+						pageLabel.setText(String(page + 1));
+						record.page = page;
+						this.updateSidebarSelection();
+					}
+				});
+				for (const child of item.items ?? []) add(child, depth + 1);
+			};
+			for (const item of outline) add(item, 0);
 		} catch (err) {
 			debug.log(`PDF outline unavailable: ${String(err)}`, "warn");
+			this.sidebarContent?.createDiv({ cls: "goodnodes-pdf-empty", text: "This PDF has no outline" });
 		}
-	}
-
-	private renderOutline(items: any[]): void {
-		this.outlineEl?.remove();
-		const panel = this.contentEl.createDiv({ cls: "goodnodes-pdf-outline" });
-		this.outlineEl = panel;
-		const add = (item: any, depth: number) => {
-			const row = panel.createDiv({ cls: "goodnodes-pdf-outline-item" });
-			row.createSpan({ text: item.title });
-			const pageLabel = row.createSpan({ cls: "goodnodes-pdf-outline-page" });
-			row.style.paddingLeft = `${8 + depth * 14}px`;
-			this.registerDomEvent(row, "click", () => void this.outlineJump(item));
-			void this.outlinePage(item).then((page) => {
-				if (page !== null) pageLabel.setText(String(page + 1));
-			});
-			for (const child of item.items ?? []) add(child, depth + 1);
-		};
-		for (const item of items) add(item, 0);
 	}
 
 	private async outlinePage(item: any): Promise<number | null> {
@@ -975,52 +1235,123 @@ export class PdfNotebookView extends FileView {
 			const ref = destination[0];
 			const index = typeof ref === "number" ? ref : await this.doc.getPageIndex(ref);
 			this.jumpTo(index);
+			if (this.contentEl.clientWidth < 900) this.closeSidebar();
 		} catch (err) {
 			debug.error("PDF outline jump failed", err);
 		}
 	}
 
-	private toggleOutline(): void {
-		if (this.outlineEl) {
-			this.outlineEl.remove();
-			this.outlineEl = null;
-		} else void this.loadOutline();
-	}
-
-	private toggleThumbnails(): void {
-		if (this.thumbPanel) {
-			this.thumbObserver?.disconnect();
-			this.thumbPanel.remove();
-			this.thumbPanel = null;
-			this.contentEl.removeClass("has-thumbnails");
-			requestAnimationFrame(() => this.onResize());
+	private toggleSidebar(tab: SidebarTab = this.sidebar ? this.sidebarTab : "pages"): void {
+		if (this.sidebar && tab === this.sidebarTab) {
+			this.closeSidebar();
 			return;
 		}
-		this.contentEl.addClass("has-thumbnails");
+		this.sidebarTab = tab;
+		if (!this.sidebar) {
+			this.contentEl.addClass("has-sidebar");
+			const panel = this.contentEl.createDiv({ cls: "goodnodes-pdf-sidebar" });
+			this.sidebar = panel;
+			const header = panel.createDiv({ cls: "goodnodes-pdf-sidebar-header" });
+			this.sidebarContent = panel.createDiv({ cls: "goodnodes-pdf-sidebar-content" });
+			header.createDiv({ cls: "goodnodes-pdf-sidebar-title" });
+			this.iconButton(header, "x", "Close sidebar", () => this.closeSidebar());
+			const tabs = panel.createDiv({ cls: "goodnodes-pdf-sidebar-tabs" });
+			for (const [name, icon] of [
+				["pages", "file"],
+				["outline", "list"],
+				["bookmarks", "bookmark"],
+			] as const) {
+				const button = tabs.createEl("button", { attr: { title: name[0].toUpperCase() + name.slice(1) } });
+				setIcon(button, icon);
+				button.dataset.sidebarTab = name;
+				button.onclick = () => {
+					this.sidebarTab = name;
+					this.renderSidebarTab();
+					this.scheduleSave();
+				};
+			}
+			this.thumbObserver = new IntersectionObserver((entries) => this.onThumbnailsIntersect(entries), {
+				root: this.sidebarContent,
+				rootMargin: "300px 0px",
+			});
+			requestAnimationFrame(() => this.onResize());
+		}
+		this.renderSidebarTab();
+		this.scheduleSave();
+	}
+
+	private closeSidebar(): void {
+		this.thumbObserver?.disconnect();
+		this.nearThumbnails.clear();
+		this.thumbObserver = null;
+		this.sidebar?.remove();
+		this.sidebar = null;
+		this.sidebarContent = null;
+		this.contentEl.removeClass("has-sidebar");
 		requestAnimationFrame(() => this.onResize());
-		const panel = this.contentEl.createDiv({ cls: "goodnodes-pdf-thumbnails" });
-		this.thumbPanel = panel;
-		const list = panel.createDiv({ cls: "goodnodes-pdf-thumbnail-list" });
-		this.thumbObserver = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries)
-					if (entry.isIntersecting)
-						void this.renderThumbnail(Number((entry.target as HTMLElement).dataset.page));
-			},
-			{ root: list, rootMargin: "300px 0px" },
-		);
-		for (let page = 0; page < this.slots.length; page++) {
-			const item = list.createDiv({ cls: "goodnodes-pdf-thumbnail", attr: { "data-page": String(page) } });
+		this.scheduleSave();
+	}
+
+	private renderSidebarTab(): void {
+		if (!this.sidebar || !this.sidebarContent) return;
+		this.sidebar
+			.querySelector(".goodnodes-pdf-sidebar-title")
+			?.setText(this.sidebarTab[0].toUpperCase() + this.sidebarTab.slice(1));
+		this.sidebar
+			.querySelectorAll<HTMLElement>("[data-sidebar-tab]")
+			.forEach((button) => button.toggleClass("is-active", button.dataset.sidebarTab === this.sidebarTab));
+		this.sidebarContent.empty();
+		this.outlineItems = [];
+		this.thumbObserver?.disconnect();
+		this.nearThumbnails.clear();
+		if (this.sidebarTab === "outline") {
+			void this.loadOutline();
+			return;
+		}
+		const pages =
+			this.sidebarTab === "bookmarks"
+				? [...this.bookmarks].sort((a, b) => a - b)
+				: this.slots.map((_, index) => index);
+		if (!pages.length) {
+			this.sidebarContent.createDiv({
+				cls: "goodnodes-pdf-empty",
+				text: "No bookmarks yet – tap the bookmark icon to mark a page",
+			});
+			return;
+		}
+		this.thumbObserver = new IntersectionObserver((entries) => this.onThumbnailsIntersect(entries), {
+			root: this.sidebarContent,
+			rootMargin: "300px 0px",
+		});
+		for (const page of pages) {
+			const item = this.sidebarContent.createDiv({
+				cls: "goodnodes-pdf-thumbnail",
+				attr: { "data-page": String(page) },
+			});
 			item.createDiv({ cls: "goodnodes-pdf-thumbnail-sheet" });
+			const ribbon = item.createEl("button", {
+				cls: "goodnodes-pdf-thumbnail-bookmark",
+				attr: { title: this.bookmarks.has(page) ? "Remove bookmark" : "Bookmark page" },
+			});
+			setIcon(ribbon, this.bookmarks.has(page) ? "bookmark-check" : "bookmark");
+			ribbon.toggleClass("is-bookmarked", this.bookmarks.has(page));
+			ribbon.onclick = (event) => {
+				event.stopPropagation();
+				this.toggleBookmark(page);
+			};
 			item.createDiv({ cls: "goodnodes-pdf-thumbnail-label", text: String(page + 1) });
-			item.onclick = () => this.jumpTo(page);
+			item.onclick = () => {
+				this.jumpTo(page);
+				if (this.contentEl.clientWidth < 900) this.closeSidebar();
+			};
 			this.thumbObserver.observe(item);
 		}
-		this.updateThumbnailSelection();
+		this.updateSidebarSelection();
+		if (this.sidebarTab === "pages") requestAnimationFrame(() => this.scrollSidebarToCurrent());
 	}
 
 	private async renderThumbnail(index: number): Promise<void> {
-		const item = this.thumbPanel?.querySelector<HTMLElement>(`.goodnodes-pdf-thumbnail[data-page="${index}"]`);
+		const item = this.sidebarContent?.querySelector<HTMLElement>(`.goodnodes-pdf-thumbnail[data-page="${index}"]`);
 		const sheet = item?.querySelector<HTMLElement>(".goodnodes-pdf-thumbnail-sheet");
 		if (!sheet || sheet.querySelector("canvas") || !this.doc) return;
 		try {
@@ -1078,18 +1409,73 @@ export class PdfNotebookView extends FileView {
 		ctx.globalAlpha = 1;
 	}
 
-	private releaseFarThumbnails(current: number): void {
-		if (!this.thumbPanel) return;
-		this.thumbPanel.querySelectorAll<HTMLElement>(".goodnodes-pdf-thumbnail").forEach((item) => {
-			const page = Number(item.dataset.page);
-			if (Math.abs(page - current) > 14) item.querySelector("canvas")?.remove();
-		});
+	/** Thumbnails within the observer margin; these are never released. */
+	private nearThumbnails = new Set<number>();
+
+	private onThumbnailsIntersect(entries: IntersectionObserverEntry[]): void {
+		for (const entry of entries) {
+			const page = Number((entry.target as HTMLElement).dataset.page);
+			if (entry.isIntersecting) {
+				this.nearThumbnails.add(page);
+				void this.renderThumbnail(page);
+			} else {
+				this.nearThumbnails.delete(page);
+			}
+		}
 	}
 
-	private updateThumbnailSelection(): void {
-		this.thumbPanel
+	/** Keep at most ~40 thumbnail canvases: drop off-screen ones, farthest from `current` first. */
+	private releaseFarThumbnails(current: number): void {
+		if (!this.sidebarContent) return;
+		const alive = [...this.sidebarContent.querySelectorAll<HTMLElement>(".goodnodes-pdf-thumbnail")].filter(
+			(item) => item.querySelector("canvas") && !this.nearThumbnails.has(Number(item.dataset.page)),
+		);
+		const excess = alive.length + this.nearThumbnails.size - 40;
+		if (excess <= 0) return;
+		alive.sort((a, b) => Math.abs(Number(b.dataset.page) - current) - Math.abs(Number(a.dataset.page) - current));
+		for (const item of alive.slice(0, excess)) {
+			const canvas = item.querySelector("canvas");
+			if (canvas) {
+				canvas.width = canvas.height = 0;
+				canvas.remove();
+			}
+		}
+	}
+
+	private updateSidebarSelection(): void {
+		this.sidebarContent
 			?.querySelectorAll<HTMLElement>(".goodnodes-pdf-thumbnail")
 			.forEach((item) => item.toggleClass("is-current", Number(item.dataset.page) === this.currentPage));
+		for (const item of this.outlineItems) item.row.toggleClass("is-current", item.page === this.currentPage);
+		this.updateToolbar();
+	}
+
+	private scrollSidebarToCurrent(): void {
+		const item = this.sidebarContent?.querySelector<HTMLElement>(
+			`.goodnodes-pdf-thumbnail[data-page="${this.currentPage}"]`,
+		);
+		if (!item || !this.sidebarContent) return;
+		const box = item.getBoundingClientRect();
+		const panel = this.sidebarContent.getBoundingClientRect();
+		if (box.top < panel.top || box.bottom > panel.bottom) item.scrollIntoView({ block: "nearest" });
+	}
+
+	private toggleBookmark(page: number): void {
+		if (this.bookmarks.has(page)) this.bookmarks.delete(page);
+		else this.bookmarks.add(page);
+		const ribbon = this.sidebarContent?.querySelector<HTMLElement>(
+			`.goodnodes-pdf-thumbnail[data-page="${page}"] .goodnodes-pdf-thumbnail-bookmark`,
+		);
+		if (ribbon) {
+			const active = this.bookmarks.has(page);
+			setIcon(ribbon, active ? "bookmark-check" : "bookmark");
+			ribbon.toggleClass("is-bookmarked", active);
+			ribbon.setAttribute("title", active ? "Remove bookmark" : "Bookmark page");
+		}
+		this.updateSidebarSelection();
+		if (this.sidebarTab === "bookmarks") this.renderSidebarTab();
+		this.markDirty();
+		this.scheduleSave();
 	}
 
 	private async loadSidecar(file: TFile, pdfSize: number): Promise<void> {
@@ -1097,8 +1483,10 @@ export class PdfNotebookView extends FileView {
 		try {
 			if (!(await this.app.vault.adapter.exists(this.sidecarPath))) {
 				this.strokes.clear();
+				this.bookmarks.clear();
 				this.currentPage = 0;
 				this.zoom = 1;
+				this.restoredSidebar = null;
 				this.lastSerialized = "";
 				this.dirty = false;
 				return;
@@ -1115,8 +1503,10 @@ export class PdfNotebookView extends FileView {
 					"warn",
 				);
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
+			this.bookmarks = new Set(parsed.bookmarks);
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
+			this.restoredSidebar = parsed.view.sidebar ?? null;
 			this.lastSerialized = text;
 			this.dirty = false;
 		} catch (err) {
@@ -1135,7 +1525,8 @@ export class PdfNotebookView extends FileView {
 			type: "goodnodes-pdf",
 			version: 1,
 			pdf: { size: file?.stat.size ?? 0, pages: this.slots.length },
-			view: { page: this.currentPage, zoom: this.zoom },
+			view: { page: this.currentPage, zoom: this.zoom, sidebar: this.sidebar ? this.sidebarTab : null },
+			bookmarks: [...this.bookmarks].sort((a, b) => a - b),
 			pages,
 		};
 	}
@@ -1195,8 +1586,10 @@ export class PdfNotebookView extends FileView {
 				return;
 			}
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
+			this.bookmarks = new Set(parsed.bookmarks);
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
+			this.restoredSidebar = parsed.view.sidebar ?? null;
 			this.lastSerialized = text;
 			this.history.clear();
 			this.releaseAll();
@@ -1206,16 +1599,38 @@ export class PdfNotebookView extends FileView {
 			}
 			for (const [index] of this.strokes) this.drawCommittedInk(index);
 			this.restorePage(this.currentPage);
+			if (this.restoredSidebar) {
+				const tab = this.restoredSidebar;
+				this.restoredSidebar = null;
+				if (!this.sidebar) this.toggleSidebar(tab);
+				else {
+					this.sidebarTab = tab;
+					this.renderSidebarTab();
+				}
+			} else if (this.sidebar) this.closeSidebar();
+			this.updateSidebarSelection();
 			this.dirty = false;
 		} catch (err) {
 			debug.log(`External PDF sidecar reload failed: ${String(err)}`, "warn");
 		}
 	}
 
+	/** Page to scroll to as soon as the scroller has a size (it may not on open). */
+	private pendingRestore: number | null = null;
+
 	private restorePage(page: number): void {
 		if (!this.slots.length) return;
-		const index = Math.max(0, Math.min(this.slots.length - 1, page));
+		this.pendingRestore = Math.max(0, Math.min(this.slots.length - 1, page));
+		this.applyPendingRestore();
+	}
+
+	private applyPendingRestore(): void {
+		if (this.pendingRestore === null || this.scroller.clientHeight === 0 || !this.slots.length) return;
+		const index = this.pendingRestore;
+		this.pendingRestore = null;
 		this.scroller.scrollTop = this.slots[index].el.offsetTop;
+		this.currentPage = index;
+		this.scheduleUpdate();
 	}
 
 	private async exportAnnotated(): Promise<void> {
@@ -1240,6 +1655,7 @@ export class PdfNotebookView extends FileView {
 
 	private clearDocument(): void {
 		this.disposed = true;
+		this.pendingRestore = null;
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
@@ -1249,6 +1665,7 @@ export class PdfNotebookView extends FileView {
 		this.observer?.disconnect();
 		this.observer = null;
 		this.thumbObserver?.disconnect();
+		this.nearThumbnails.clear();
 		this.thumbObserver = null;
 		this.queue = [];
 		for (const index of this.slots.keys()) this.release(index);
@@ -1256,14 +1673,27 @@ export class PdfNotebookView extends FileView {
 		this.loaded.clear();
 		this.visible.clear();
 		this.strokes.clear();
+		this.bookmarks.clear();
 		this.history.clear();
 		this.doc?.destroy?.();
 		this.doc = null;
 		this.pagesEl.empty();
-		this.outlineEl?.remove();
-		this.outlineEl = null;
-		this.thumbPanel?.remove();
-		this.thumbPanel = null;
+		this.closePopover();
+		this.sidebar?.remove();
+		this.sidebar = null;
+		this.sidebarContent = null;
+		this.contentEl.removeClass("has-sidebar");
+		if (this.settingsTimer !== null) {
+			window.clearTimeout(this.settingsTimer);
+			this.settingsTimer = null;
+			void this.plugin.saveSettings();
+		}
+		if (this.scrubberTimer !== null) {
+			window.clearTimeout(this.scrubberTimer);
+			this.scrubberTimer = null;
+		}
+		cancelAnimationFrame(this.scrubberRaf);
+		this.scrubberRaf = 0;
 		this.activeStroke = null;
 		this.pointers.clear();
 		this.pinch = null;

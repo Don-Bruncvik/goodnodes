@@ -6,7 +6,8 @@ const example: PdfSidecar = {
 	type: "goodnodes-pdf",
 	version: 1,
 	pdf: { size: 1234, pages: 2 },
-	view: { page: 1, zoom: 1.25 },
+	view: { page: 1, zoom: 1.25, sidebar: null },
+	bookmarks: [0],
 	pages: { "1": [{ id: "s1", tool: "pen", color: "#1971c2", width: 2, points: [[1.236, 4.567, 0.7]] }] },
 };
 
@@ -18,6 +19,14 @@ describe("PDF sidecar", () => {
 			...example,
 			pages: { "1": [{ ...example.pages["1"][0], points: [[1.24, 4.57, 0.7]] }] },
 		});
+	});
+
+	it("defaults old bookmark data and normalizes bookmark indexes", () => {
+		const old = { ...example, view: { page: 1, zoom: 1.25 }, bookmarks: undefined };
+		expect(parseSidecar(JSON.stringify(old), 2)?.bookmarks).toEqual([]);
+		const parsed = parseSidecar(JSON.stringify({ ...example, bookmarks: [1, 1, -1, 8, 0] }), 2);
+		expect(parsed?.bookmarks).toEqual([0, 1]);
+		expect(parseSidecar(serializeSidecar({ ...example, bookmarks: [1, 0, 1] }), 2)?.bookmarks).toEqual([0, 1]);
 	});
 
 	it("tolerates garbage and old/invalid files", () => {

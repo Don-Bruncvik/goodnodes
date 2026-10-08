@@ -13,7 +13,8 @@ export interface PdfSidecar {
 	type: "goodnodes-pdf";
 	version: 1;
 	pdf: { size: number; pages: number };
-	view: { page: number; zoom: number };
+	view: { page: number; zoom: number; sidebar?: "pages" | "outline" | "bookmarks" | null };
+	bookmarks: number[];
 	pages: Record<string, InkStroke[]>;
 }
 
