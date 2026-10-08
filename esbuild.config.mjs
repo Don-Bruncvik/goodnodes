@@ -26,11 +26,31 @@ const inlineExcalidrawFonts = {
   },
 };
 
+// Trim optional Excalidraw extras that would otherwise be inlined into main.js:
+// the Mermaid-to-diagram importer (mermaid, katex, cytoscape: ~3 MB) and UI
+// translations other than English (built in), Slovak and Czech.
+const KEEP_LOCALES = /(sk-SK|cs-CZ)-/;
+const trimExcalidraw = {
+  name: "trim-excalidraw",
+  setup(build) {
+    build.onResolve({ filter: /^@excalidraw\/mermaid-to-excalidraw$/ }, () => ({ path: "mermaid", namespace: "stub" }));
+    build.onResolve({ filter: /^\.\/locales\// }, (args) =>
+      KEEP_LOCALES.test(args.path) ? undefined : { path: args.path, namespace: "stub-locale" },
+    );
+    build.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
+      contents: "export async function parseMermaidToExcalidraw() { throw new Error('Mermaid import is not included in GoodNodes'); }",
+      loader: "js",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "stub-locale" }, () => ({ contents: "export default {};", loader: "js" }));
+  },
+};
+
 // Obsidian loads styles.css; merge Excalidraw's CSS (emitted as main.css) with ours.
 const writeStyles = {
   name: "write-styles",
   setup(build) {
-    build.onEnd(() => {
+    build.onEnd((result) => {
+      if (result.errors.length) return;
       const parts = [];
       if (fs.existsSync("main.css")) parts.push(fs.readFileSync("main.css", "utf8"));
       parts.push(fs.readFileSync("src/styles.css", "utf8"));
@@ -55,15 +75,18 @@ const ctx = await esbuild.context({
   conditions: ["production"],
   define: { "process.env.NODE_ENV": '"production"', "process.env.IS_PREACT": '"false"' },
   logLevel: "info",
+  loader: { ".woff2": "dataurl" },
   sourcemap: prod ? false : "inline",
   minify: prod,
   treeShaking: true,
   outdir: ".",
-  plugins: [inlineExcalidrawFonts, writeStyles],
+  metafile: !!process.env.ANALYZE,
+  plugins: [trimExcalidraw, inlineExcalidrawFonts, writeStyles],
 });
 
 if (prod) {
-  await ctx.rebuild();
+  const result = await ctx.rebuild();
+  if (process.env.ANALYZE) console.log(await esbuild.analyzeMetafile(result.metafile, { verbose: false }));
   process.exit(0);
 } else {
   await ctx.watch();
