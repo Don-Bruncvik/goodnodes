@@ -104,6 +104,7 @@ describe("scratch gesture detection", () => {
     }));
     const start = performance.now();
     findScratchedStrokes(scratch, strokes);
-    expect(performance.now() - start).toBeLessThan(50);
+    // Shared CI runners are a lot slower and noisier than a laptop.
+    expect(performance.now() - start).toBeLessThan((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.CI ? 300 : 50);
   });
 });
