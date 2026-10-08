@@ -2,11 +2,20 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type GoodNodesPlugin from "./main";
 
 export interface GoodNodesSettings {
-	/** Default ink for new strokes (PDF notebooks; the canvas keeps Excalidraw's own picker). */
+	// Last used tool settings, chosen in the pen popover (tap the active pen) and
+	// remembered across notebooks and restarts. Not shown in the settings tab.
+	/** PDF pen ink color. */
 	penColor: string;
-	/** Default pen width in page points (PDF) / Excalidraw stroke width (canvas). */
+	/** PDF pen width in page points. */
 	penWidth: number;
 	highlighterColor: string;
+	/** PDF highlighter width, in stroke.width units (highlighters render 5× wider than pens). */
+	highlighterWidth: number;
+	/** PDF eraser radius in CSS px. */
+	eraserSize: number;
+	/** Canvas (Excalidraw) freedraw color and width. */
+	canvasPenColor: string;
+	canvasPenWidth: number;
 	/** Smooth strokes with perfect-freehand's streamline/smoothing. */
 	smoothing: boolean;
 	scratchEnabled: boolean;
@@ -29,6 +38,10 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	penColor: "#1e1e1e",
 	penWidth: 2,
 	highlighterColor: "#ffd43b",
+	highlighterWidth: 2.4,
+	eraserSize: 10,
+	canvasPenColor: "#1e1e1e",
+	canvasPenWidth: 2,
 	smoothing: true,
 	scratchEnabled: true,
 	scratchMinReversals: 4,
@@ -54,21 +67,7 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 		const save = () => void this.plugin.saveSettings();
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Pen").setHeading();
-		new Setting(containerEl)
-			.setName("Default pen color")
-			.setDesc("Ink color for new strokes in PDF notebooks.")
-			.addColorPicker((c) => c.setValue(s.penColor).onChange((v) => ((s.penColor = v), save())));
-		new Setting(containerEl).setName("Default pen width").addSlider((sl) =>
-			sl
-				.setLimits(0.5, 8, 0.5)
-				.setValue(s.penWidth)
-				.setDynamicTooltip()
-				.onChange((v) => ((s.penWidth = v), save())),
-		);
-		new Setting(containerEl)
-			.setName("Highlighter color")
-			.addColorPicker((c) => c.setValue(s.highlighterColor).onChange((v) => ((s.highlighterColor = v), save())));
+		new Setting(containerEl).setName("Writing").setHeading();
 		new Setting(containerEl)
 			.setName("Smooth strokes")
 			.setDesc("Even out shaky lines while writing.")
