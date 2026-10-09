@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.3.0)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.0)
 
 ## Výsledky spike M0
 
@@ -25,6 +25,11 @@
 **0.3.0:**
 - Knižnica GoodNodes (📚): domovská obrazovka s obálkami zošitov a PDF, hľadaním, tlačidlami „+ New notebook“ a „Import PDF“ (z appky Súbory). V menu priečinka pribudlo „Import PDF here“.
 - Plátno už nemá prvky Excalidrawu: vlastné hlavné menu, vlastný pomocník (aj pod „?“), knižnica bez odkazov na Excalidraw, ktorú zdieľajú všetky zošity, a žiadne AI ani Mermaid.
+
+**0.4.0:**
+- Knižnica (domovská obrazovka) je preč, všetko ide cez menu priečinka v Obsidiane: New GoodNodes notebook, New GoodNodes whiteboard, New text document a Import into GoodNodes here (PDF aj obrázky).
+- Zošity: obálka, papier (prázdny, linajky, husté linajky, štvorčeky, bodky), A4 alebo Letter, na výšku alebo na šírku. Pridávanie, vkladanie a mazanie strán, vloženie strán iného PDF do zošita.
+- Whiteboard: Insert PDF vloží strany PDF ako obrázky.
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 

@@ -20,6 +20,8 @@ Handwritten notebooks for Obsidian, made for the iPad and Apple Pencil. A GoodNo
 | Tap the active pen to pick color & width | ✅ | ✅ |
 | Pen, highlighter, eraser | Excalidraw tools | ✅ |
 | Pages sidebar: thumbnails, outline, bookmarks | – | ✅ |
+| Add / insert / delete pages, insert another PDF | – | ✅ |
+| Insert a PDF (pages as images) | ✅ | – |
 | Draggable page scrubber, jump to page | – | ✅ |
 | Export "PDF with notes" | Excalidraw image export | ✅ |
 | Dark / light theme follows Obsidian | ✅ | ✅ |
@@ -33,9 +35,17 @@ Everything is a plain file in your vault, so any sync method works (Obsidian Syn
 
 ## Usage
 
-- **Library**: the 📚 ribbon icon opens the GoodNodes library, a home screen with covers of all your notebooks and PDFs, search, and the **+ New notebook** and **Import PDF** buttons. On the iPad, *Import PDF* opens the Files app; the PDF is copied into the `GoodNodes` folder (configurable) and opened as a notebook.
-- **New canvas**: *+ New notebook* in the library, the ✏️ ribbon icon, or right-click a folder → *New GoodNodes canvas*. Tap any `.goodnodes` file to open it.
-- **PDF as notebook**: tap it in the library, or right-click a PDF → *Open as GoodNodes notebook*. Right-click a folder → *Import PDF here*. In settings you can make tapping a PDF in the file list always open it in GoodNodes.
+Everything starts from Obsidian's file explorer. Right-click a folder (long-press on the iPad):
+
+- **New GoodNodes notebook**: a paged notebook with a cover color, paper (blank, ruled, narrow ruled, grid, dots), A4/Letter, portrait/landscape. It is a PDF, so it opens everywhere.
+- **New GoodNodes whiteboard**: an infinite canvas (`.goodnodes`).
+- **New text document**: a normal Obsidian note.
+- **Import into GoodNodes here**: pick PDFs and/or images from Files (iPad) or disk. PDFs are copied in as they are; images become a notebook with one page per image.
+
+Right-click a PDF → **Open as GoodNodes notebook** (or enable *Open PDFs in GoodNodes* in settings so tapping a PDF does it).
+
+In a notebook/PDF, the **…** menu adds, inserts or deletes pages, **inserts the pages of another PDF**, zooms and exports a PDF with your notes. There's also a **+ Add page** slot after the last page. On a whiteboard, **Insert PDF** (top right, or ☰) places PDF pages on the board as images you can write on.
+
 - **Pen color & width**: tap the pen once to select it, tap it again to open its color and width picker. Your choice is remembered.
 - **Scratch out**: scribble firmly back and forth (at least ~4 direction changes) over handwriting. Strokes mostly covered by the scribble disappear together with the scribble. One or two lines through a word, or a scribble over empty space, stay as normal strokes. You can tune or disable this in settings.
 

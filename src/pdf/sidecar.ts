@@ -1,4 +1,5 @@
 import type { InkStroke, PdfSidecar } from "./model";
+import type { NotebookMeta, Orientation, PaperSize, PaperTemplate } from "../notebook";
 
 export function parseSidecar(text: string, pageCount: number): PdfSidecar | null {
 	try {
@@ -20,6 +21,7 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 			}));
 			if (strokes.length) pages[key] = strokes;
 		}
+		const notebook = parseNotebook(raw.notebook);
 		return {
 			type: "goodnodes-pdf",
 			version: 1,
@@ -40,10 +42,29 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 				),
 			].sort((a, b) => a - b),
 			pages,
+			...(notebook ? { notebook } : {}),
 		};
 	} catch {
 		return null;
 	}
+}
+
+function parseNotebook(value: unknown): NotebookMeta | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const raw = value as Partial<NotebookMeta>;
+	if (
+		!(["blank", "ruled", "ruled-narrow", "grid", "dots"] as PaperTemplate[]).includes(raw.template as PaperTemplate)
+	)
+		return undefined;
+	if (!("a4" === raw.size || "letter" === raw.size)) return undefined;
+	if (!("portrait" === raw.orientation || "landscape" === raw.orientation)) return undefined;
+	if (raw.cover !== null && (typeof raw.cover !== "string" || !/^#[\da-f]{6}$/i.test(raw.cover))) return undefined;
+	return {
+		template: raw.template as PaperTemplate,
+		size: raw.size as PaperSize,
+		orientation: raw.orientation as Orientation,
+		cover: raw.cover,
+	};
 }
 
 export function serializeSidecar(data: PdfSidecar): string {

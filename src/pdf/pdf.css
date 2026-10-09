@@ -45,6 +45,20 @@
 	overflow: hidden;
 	touch-action: pan-x pan-y;
 }
+.goodnodes-pdf-add-page {
+	flex: 0 0 auto;
+	margin: 0 0 8px;
+	border: 2px dashed var(--background-modifier-border);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 80%, transparent);
+	color: var(--text-muted);
+	font-size: 18px;
+	touch-action: manipulation;
+}
+.goodnodes-pdf-add-page:hover {
+	border-color: var(--interactive-accent);
+	color: var(--interactive-accent);
+}
 .goodnodes-pdf-canvas,
 .goodnodes-pdf-ink,
 .goodnodes-pdf-live {
@@ -482,4 +496,19 @@
 	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-sidebar {
 		z-index: 14;
 	}
+}
+
+/* "+ Add page": a slim dashed slot under the last page, not a full grey button. */
+.goodnodes-pdf-pages button.goodnodes-pdf-add-page {
+	height: 110px !important;
+	max-width: 100%;
+	border: 2px dashed var(--background-modifier-border-hover, var(--background-modifier-border)) !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--text-muted);
+	font-size: 17px;
+}
+.goodnodes-pdf-pages button.goodnodes-pdf-add-page:hover {
+	color: var(--text-normal);
+	border-color: var(--interactive-accent) !important;
 }

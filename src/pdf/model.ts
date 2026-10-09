@@ -16,6 +16,7 @@ export interface PdfSidecar {
 	view: { page: number; zoom: number; sidebar?: "pages" | "outline" | "bookmarks" | null };
 	bookmarks: number[];
 	pages: Record<string, InkStroke[]>;
+	notebook?: import("../notebook").NotebookMeta;
 }
 
 export interface PdfHistoryEntry {

@@ -15,3 +15,8 @@ test-vault/**/* (annotated)*.pdf
 test-vault/.obsidian/plugins/
 test-vault/.obsidian/appearance.json
 test-vault/GoodNodes/
+test-vault/*.jpg
+test-vault/Test/*
+!test-vault/Test/test-300.pdf
+test-vault/*.md
+!test-vault/Welcome.md

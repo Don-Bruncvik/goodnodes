@@ -9,6 +9,7 @@ const example: PdfSidecar = {
 	view: { page: 1, zoom: 1.25, sidebar: null },
 	bookmarks: [0],
 	pages: { "1": [{ id: "s1", tool: "pen", color: "#1971c2", width: 2, points: [[1.236, 4.567, 0.7]] }] },
+	notebook: { template: "ruled", size: "a4", orientation: "portrait", cover: "#2f6fdd" },
 };
 
 describe("PDF sidecar", () => {
@@ -27,6 +28,13 @@ describe("PDF sidecar", () => {
 		const parsed = parseSidecar(JSON.stringify({ ...example, bookmarks: [1, 1, -1, 8, 0] }), 2);
 		expect(parsed?.bookmarks).toEqual([0, 1]);
 		expect(parseSidecar(serializeSidecar({ ...example, bookmarks: [1, 0, 1] }), 2)?.bookmarks).toEqual([0, 1]);
+	});
+
+	it("round trips valid notebook metadata and ignores invalid metadata", () => {
+		expect(parseSidecar(serializeSidecar(example), 2)?.notebook).toEqual(example.notebook);
+		expect(
+			parseSidecar(JSON.stringify({ ...example, notebook: { template: "bad" } }), 2)?.notebook,
+		).toBeUndefined();
 	});
 
 	it("tolerates garbage and old/invalid files", () => {

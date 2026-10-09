@@ -1,4 +1,16 @@
-import { App, FileView, loadPdfJs, Menu, Modal, Notice, setIcon, TFile, WorkspaceLeaf } from "obsidian";
+import {
+	App,
+	FileView,
+	FuzzySuggestModal,
+	loadPdfJs,
+	Menu,
+	Modal,
+	Notice,
+	setIcon,
+	TFile,
+	WorkspaceLeaf,
+} from "obsidian";
+import { PDFDocument } from "pdf-lib";
 import { getStroke } from "perfect-freehand";
 import { findScratchedStrokes } from "../scratch/detect";
 import type GoodNodesPlugin from "../main";
@@ -10,6 +22,10 @@ import { PdfHistory } from "./history";
 import type { InkPoint, InkStroke, InkTool, PdfSidecar } from "./model";
 import { newStrokeId } from "./model";
 import { parseSidecar, serializeSidecar } from "./sidecar";
+import { deleteSidecarPage, insertSidecarPages } from "./page-ops";
+import { drawPaperTemplate } from "../notebook/paper";
+import type { NotebookMeta } from "../notebook";
+import { pickFiles } from "../files";
 import "./pdf.css";
 
 export const PDF_VIEW_TYPE = "goodnodes-pdf";
@@ -123,6 +139,10 @@ export class PdfNotebookView extends FileView {
 	private revision = 0;
 	private loadingSidecar = false;
 	private currentPage = 0;
+	private notebookMeta?: NotebookMeta;
+	private ownPdfWrite = false;
+	private pdfSignature = "";
+	private pageOperation = false;
 	private touchStart = (e: TouchEvent) => this.blockStylusTouch(e);
 	private touchMove = (event: TouchEvent) => {
 		this.blockStylusTouch(event);
@@ -192,6 +212,12 @@ export class PdfNotebookView extends FileView {
 				if (path === this.sidecarPath) void this.readExternalSidecar();
 			}),
 		);
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file === this.file && file instanceof TFile && file.extension === "pdf")
+					void this.checkExternalPdf(file);
+			}),
+		);
 	}
 
 	getViewType(): string {
@@ -224,6 +250,7 @@ export class PdfNotebookView extends FileView {
 			this.pdfjs = await loadPdfJs();
 			debug.log(`pdf.js ${this.pdfjs?.version ?? "version unavailable"}`);
 			const data = await this.app.vault.readBinary(file);
+			this.pdfSignature = `${file.stat.size}:${file.stat.mtime}`;
 			if (stale()) return;
 			const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
 			if (stale()) {
@@ -370,6 +397,30 @@ export class PdfNotebookView extends FileView {
 		);
 		menu.addItem((item) =>
 			item
+				.setTitle("Add page at the end")
+				.setIcon("file-plus-2")
+				.onClick(() => void this.insertBlankPage(this.slots.length)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Insert page after this one")
+				.setIcon("file-plus")
+				.onClick(() => void this.insertBlankPage(this.currentPage + 1)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Insert PDF pages…")
+				.setIcon("files")
+				.onClick(() => void this.choosePdfToInsert()),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Delete this page")
+				.setIcon("file-minus-2")
+				.onClick(() => this.confirmDeletePage()),
+		);
+		menu.addItem((item) =>
+			item
 				.setTitle("Export PDF with notes")
 				.setIcon("file-down")
 				.onClick(() => void this.exportAnnotated()),
@@ -512,6 +563,10 @@ export class PdfNotebookView extends FileView {
 				rotation: 0,
 			});
 		}
+		const addTile = this.pagesEl.createEl("button", { cls: "goodnodes-pdf-add-page", text: "+ Add page" });
+		addTile.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
+		addTile.style.height = `${this.baseHeight * this.pageScale * this.zoom * 0.3}px`;
+		addTile.onclick = () => void this.insertBlankPage(this.slots.length);
 	}
 
 	private observe(): void {
@@ -793,6 +848,7 @@ export class PdfNotebookView extends FileView {
 			} else {
 				this.relayout(() => (this.pageScale = next));
 			}
+			this.updateAddPageTile();
 		}
 		this.applyPendingRestore();
 	}
@@ -809,6 +865,7 @@ export class PdfNotebookView extends FileView {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
 		}
+		this.updateAddPageTile();
 		this.applyZoomAnchor(anchor, screenX, screenY);
 		this.scheduleUpdate();
 	}
@@ -833,6 +890,13 @@ export class PdfNotebookView extends FileView {
 
 	private releaseAll(): void {
 		for (const index of this.slots.keys()) this.release(index);
+	}
+
+	private updateAddPageTile(): void {
+		const tile = this.pagesEl.querySelector<HTMLElement>(".goodnodes-pdf-add-page");
+		if (!tile) return;
+		tile.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
+		tile.style.height = `${this.baseHeight * this.pageScale * this.zoom * 0.3}px`;
 	}
 
 	private pointerDown(event: PointerEvent): void {
@@ -1129,6 +1193,7 @@ export class PdfNotebookView extends FileView {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
 		}
+		this.updateAddPageTile();
 		this.applyZoomAnchor(gesture.anchor, gesture.centerX, gesture.centerY);
 		this.pinch = null;
 		this.markDirty();
@@ -1486,6 +1551,7 @@ export class PdfNotebookView extends FileView {
 				this.bookmarks.clear();
 				this.currentPage = 0;
 				this.zoom = 1;
+				this.notebookMeta = undefined;
 				this.restoredSidebar = null;
 				this.lastSerialized = "";
 				this.dirty = false;
@@ -1507,6 +1573,7 @@ export class PdfNotebookView extends FileView {
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
 			this.restoredSidebar = parsed.view.sidebar ?? null;
+			this.notebookMeta = parsed.notebook;
 			this.lastSerialized = text;
 			this.dirty = false;
 		} catch (err) {
@@ -1528,6 +1595,7 @@ export class PdfNotebookView extends FileView {
 			view: { page: this.currentPage, zoom: this.zoom, sidebar: this.sidebar ? this.sidebarTab : null },
 			bookmarks: [...this.bookmarks].sort((a, b) => a - b),
 			pages,
+			...(this.notebookMeta ? { notebook: this.notebookMeta } : {}),
 		};
 	}
 
@@ -1590,6 +1658,7 @@ export class PdfNotebookView extends FileView {
 			this.currentPage = parsed.view.page;
 			this.zoom = parsed.view.zoom;
 			this.restoredSidebar = parsed.view.sidebar ?? null;
+			this.notebookMeta = parsed.notebook;
 			this.lastSerialized = text;
 			this.history.clear();
 			this.releaseAll();
@@ -1613,6 +1682,150 @@ export class PdfNotebookView extends FileView {
 		} catch (err) {
 			debug.log(`External PDF sidecar reload failed: ${String(err)}`, "warn");
 		}
+	}
+
+	private async insertBlankPage(at: number): Promise<void> {
+		await this.changePdfPages(async (pdf) => {
+			const index = Math.max(0, Math.min(pdf.getPageCount(), at));
+			const neighbor = pdf.getPages()[Math.min(index, pdf.getPageCount() - 1)];
+			const size = this.notebookMeta ? notebookPageSize(this.notebookMeta) : neighbor.getSize();
+			const page = pdf.insertPage(index, [size.width, size.height]);
+			if (this.notebookMeta) drawPaperTemplate(page, this.notebookMeta.template);
+			return { index, count: 1 };
+		});
+	}
+
+	private async choosePdfToInsert(): Promise<void> {
+		const files = this.app.vault
+			.getFiles()
+			.filter((file) => file.extension.toLowerCase() === "pdf" && file.path !== this.file?.path);
+		new InsertPdfModal(this.app, files, async (file) => {
+			let bytes: ArrayBuffer;
+			let name: string;
+			if (!file) {
+				const picked = await pickFiles("application/pdf,.pdf", { multiple: false });
+				if (!picked.length) return;
+				bytes = await picked[0].arrayBuffer();
+				name = picked[0].name;
+			} else {
+				bytes = await this.app.vault.readBinary(file);
+				name = file.basename;
+			}
+			try {
+				const count = await this.insertPdfBytes(bytes, this.currentPage + 1);
+				if (count) new Notice(`Inserted ${count} pages`);
+			} catch (err) {
+				debug.error(`Could not insert PDF pages from ${name}`, err);
+				new Notice("Could not insert PDF pages. See GoodNodes debug log.");
+			}
+		}).open();
+	}
+
+	private async insertPdfBytes(sourceBytes: ArrayBuffer, at: number): Promise<number> {
+		return this.changePdfPages(async (pdf) => {
+			const source = await PDFDocument.load(sourceBytes);
+			const indexes = source.getPageIndices();
+			const copies = await pdf.copyPages(source, indexes);
+			const index = Math.max(0, Math.min(pdf.getPageCount(), at));
+			copies.forEach((page, offset) => pdf.insertPage(index + offset, page));
+			return { index, count: copies.length };
+		});
+	}
+
+	private confirmDeletePage(): void {
+		const page = this.currentPage + 1;
+		new ConfirmDeletePageModal(this.app, this.file?.basename ?? "PDF", page, !this.notebookMeta, () => {
+			if (this.slots.length <= 1) {
+				new Notice("A PDF must contain at least one page.");
+				return;
+			}
+			void this.changePdfPages(async (pdf) => {
+				const index = this.currentPage;
+				pdf.removePage(index);
+				return { index, count: 0, deleted: true };
+			});
+		}).open();
+	}
+
+	private async changePdfPages(
+		edit: (pdf: PDFDocument) => Promise<{ index: number; count: number; deleted?: boolean }>,
+	): Promise<number> {
+		const file = this.file;
+		if (!file || this.pageOperation) return 0;
+		this.pageOperation = true;
+		try {
+			await this.flushSave();
+			const bytes = await this.app.vault.readBinary(file);
+			const pdf = await PDFDocument.load(bytes);
+			const result = await edit(pdf);
+			const sidecar = result.deleted
+				? deleteSidecarPage(this.makeSidecar(), result.index, this.slots.length)
+				: insertSidecarPages(this.makeSidecar(), result.index, result.count);
+			this.strokes = new Map(Object.entries(sidecar.pages).map(([key, strokes]) => [Number(key), strokes]));
+			this.bookmarks = new Set(sidecar.bookmarks);
+			this.currentPage = result.deleted ? sidecar.view.page : result.index;
+			// Ink history is page-indexed, so page structure changes invalidate every undo entry.
+			this.history.clear();
+			this.updateHistoryButtons();
+			this.dirty = true;
+			this.revision++;
+			this.ownPdfWrite = true;
+			const output = new Uint8Array(await pdf.save());
+			const copy = new Uint8Array(output.length);
+			copy.set(output);
+			await this.app.vault.modifyBinary(file, copy.buffer);
+			this.pdfSignature = `${file.stat.size}:${file.stat.mtime}`;
+			await this.reloadInPlace(copy.buffer, this.currentPage);
+			this.updateToolbar();
+			if (this.sidebar) this.renderSidebarTab();
+			await this.writeSidecar();
+			return result.count;
+		} catch (err) {
+			debug.error("PDF page operation failed", err);
+			new Notice("Could not change PDF pages. See GoodNodes debug log.");
+			return 0;
+		} finally {
+			this.ownPdfWrite = false;
+			this.pageOperation = false;
+		}
+	}
+
+	private async checkExternalPdf(file: TFile): Promise<void> {
+		if (this.ownPdfWrite || this.pageOperation || this.disposed) return;
+		const signature = `${file.stat.size}:${file.stat.mtime}`;
+		if (signature === this.pdfSignature) return;
+		this.pdfSignature = signature;
+		try {
+			const bytes = await this.app.vault.readBinary(file);
+			await this.reloadInPlace(bytes, this.currentPage);
+		} catch (err) {
+			debug.error("External PDF reload failed", err);
+		}
+	}
+
+	private async reloadInPlace(bytes: ArrayBuffer, page: number): Promise<void> {
+		if (!this.pdfjs) this.pdfjs = await loadPdfJs();
+		this.observer?.disconnect();
+		this.observer = null;
+		this.releaseAll();
+		this.loaded.clear();
+		this.visible.clear();
+		this.queue = [];
+		await this.doc?.destroy?.();
+		this.doc = null;
+		const data = bytes.slice(0);
+		const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+		this.doc = doc;
+		const first = await doc.getPage(1);
+		const viewport = first.getViewport({ scale: 1 });
+		this.baseWidth = viewport.width;
+		this.baseHeight = viewport.height;
+		this.pageScale = this.fitScale();
+		this.buildSlots();
+		this.observe();
+		this.renderSidebarTab();
+		this.restorePage(page);
+		this.scheduleUpdate();
 	}
 
 	/** Page to scroll to as soon as the scroller has a size (it may not on open). */
@@ -1674,6 +1887,8 @@ export class PdfNotebookView extends FileView {
 		this.visible.clear();
 		this.strokes.clear();
 		this.bookmarks.clear();
+		this.notebookMeta = undefined;
+		this.pdfSignature = "";
 		this.history.clear();
 		this.doc?.destroy?.();
 		this.doc = null;
@@ -1721,6 +1936,57 @@ class PageModal extends Modal {
 	}
 }
 
+class ConfirmDeletePageModal extends Modal {
+	constructor(
+		app: App,
+		pdfName: string,
+		page: number,
+		importedPdf: boolean,
+		private confirm: () => void,
+	) {
+		super(app);
+		this.titleEl.setText(`Delete page ${page}?`);
+		this.contentEl.createEl("p", {
+			text: importedPdf
+				? `Page ${page} and your notes on it are removed from “${pdfName}”. This changes the PDF file itself.`
+				: `Page ${page} and your notes on it are removed from “${pdfName}”.`,
+		});
+		const actions = this.contentEl.createDiv({ cls: "modal-button-container" });
+		actions.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+		actions.createEl("button", { text: "Delete", cls: "mod-warning" }).onclick = () => {
+			this.close();
+			this.confirm();
+		};
+	}
+}
+
+class InsertPdfModal extends FuzzySuggestModal<TFile | null> {
+	constructor(
+		app: App,
+		private files: TFile[],
+		private onChoose: (file: TFile | null) => void,
+	) {
+		super(app);
+		this.setPlaceholder("Choose a PDF to insert");
+	}
+	getItems(): (TFile | null)[] {
+		return [null, ...this.files];
+	}
+	getItemText(item: TFile | null): string {
+		return item ? item.path : "From Files…";
+	}
+	onChooseItem(item: TFile | null): void {
+		this.onChoose(item);
+	}
+}
+
 function round(value: number): number {
 	return Math.round(value * 100) / 100;
+}
+
+function notebookPageSize(meta: NotebookMeta): { width: number; height: number } {
+	const [portraitWidth, portraitHeight] = meta.size === "a4" ? [595.28, 841.89] : [612, 792];
+	return meta.orientation === "landscape"
+		? { width: portraitHeight, height: portraitWidth }
+		: { width: portraitWidth, height: portraitHeight };
 }

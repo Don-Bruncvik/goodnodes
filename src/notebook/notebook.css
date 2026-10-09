@@ -1,0 +1,120 @@
+.goodnodes-notebook-modal .modal-content {
+	max-height: min(82vh, 760px);
+	overflow: auto;
+}
+.goodnodes-notebook-modal .goodnodes-notebook-title {
+	width: 100%;
+	min-height: 44px;
+	margin: 6px 0 12px;
+}
+.goodnodes-notebook-section-title {
+	margin: 12px 0 6px;
+	font-weight: 600;
+}
+.goodnodes-notebook-swatches,
+.goodnodes-notebook-templates,
+.goodnodes-notebook-segments,
+.goodnodes-notebook-actions {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+}
+.goodnodes-notebook-swatches {
+	overflow-x: auto;
+	padding: 3px;
+}
+.goodnodes-notebook-swatch,
+.goodnodes-notebook-template,
+.goodnodes-notebook-segments button,
+.goodnodes-notebook-pages-row button,
+.goodnodes-notebook-actions button {
+	min-width: 42px;
+	min-height: 42px;
+}
+.goodnodes-notebook-swatch {
+	position: relative;
+	width: 42px;
+	min-width: 42px;
+	height: 42px;
+	min-height: 42px;
+	border-radius: 50%;
+	background: var(--cover-color, var(--background-secondary));
+}
+.goodnodes-notebook-swatch.is-none::after {
+	position: absolute;
+	left: 5px;
+	width: 25px;
+	height: 2px;
+	background: var(--text-muted);
+	content: "";
+	transform: rotate(-45deg);
+}
+.goodnodes-notebook-swatch.is-selected,
+.goodnodes-notebook-template.is-selected,
+.goodnodes-notebook-segments button.is-selected {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+.goodnodes-notebook-templates {
+	flex-wrap: wrap;
+}
+.goodnodes-notebook-template {
+	display: flex;
+	width: 66px;
+	height: 94px;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 3px;
+	padding: 4px;
+	font-size: 10px;
+}
+.goodnodes-notebook-template svg,
+.goodnodes-notebook-preview svg {
+	width: 42px;
+	height: 58px;
+	border: 1px solid var(--background-modifier-border);
+	background: white;
+}
+.goodnodes-notebook-preview {
+	display: none;
+}
+.goodnodes-notebook-choice-row,
+.goodnodes-notebook-pages-row {
+	display: flex;
+	min-height: 48px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+.goodnodes-notebook-segments {
+	gap: 0;
+}
+.goodnodes-notebook-segments button {
+	padding: 0 14px;
+}
+.goodnodes-notebook-pages-count {
+	min-width: 32px;
+	text-align: center;
+}
+.goodnodes-notebook-actions {
+	justify-content: flex-end;
+	margin-top: 12px;
+}
+.goodnodes-notebook-actions button {
+	padding: 0 18px;
+}
+@media (max-width: 520px) {
+	.goodnodes-notebook-modal .modal {
+		width: calc(100vw - 24px);
+	}
+	.goodnodes-notebook-swatches {
+		gap: 4px;
+	}
+}
+
+/* Obsidian's global button styles would paint every swatch grey. */
+.goodnodes-notebook-modal button.goodnodes-notebook-swatch {
+	background: var(--cover-color, var(--background-secondary)) !important;
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15) !important;
+}
