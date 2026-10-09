@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSidecar, serializeSidecar } from "./sidecar";
-import type { PdfSidecar } from "./model";
+import type { InkStroke, PdfSidecar } from "./model";
 
 const example: PdfSidecar = {
 	type: "goodnodes-pdf",
@@ -13,6 +13,38 @@ const example: PdfSidecar = {
 };
 
 describe("PDF sidecar", () => {
+	it("round trips text and image box items", () => {
+		const items: InkStroke[] = [
+			{
+				id: "t",
+				tool: "pen",
+				color: "#123456",
+				width: 12,
+				kind: "text",
+				text: "Hello",
+				font: 6,
+				align: "center",
+				points: [
+					[1, 2, 0.5],
+					[30, 40, 0.5],
+				],
+			},
+			{
+				id: "i",
+				tool: "pen",
+				color: "#123456",
+				width: 1,
+				kind: "image",
+				src: "img/a.png",
+				points: [
+					[3, 4, 0.5],
+					[50, 60, 0.5],
+				],
+			},
+		];
+		const data = { ...example, pages: { "0": items } };
+		expect(parseSidecar(serializeSidecar(data), 2)?.pages["0"]).toEqual(items);
+	});
 	it("round trips compact versioned data", () => {
 		const encoded = serializeSidecar(example);
 		expect(encoded).not.toContain("\n");
@@ -44,6 +76,47 @@ describe("PDF sidecar", () => {
 
 	it("skips malformed and out-of-range stroke records", () => {
 		const parsed = parseSidecar(JSON.stringify({ ...example, pages: { "0": [null], "9": example.pages["1"] } }), 2);
+		expect(parsed?.pages).toEqual({});
+	});
+
+	it("drops unknown or invalid box item kinds", () => {
+		const base = example.pages["1"][0];
+		const parsed = parseSidecar(
+			JSON.stringify({
+				...example,
+				pages: {
+					"0": [
+						{
+							...base,
+							kind: "unknown",
+							text: "x",
+							points: [
+								[0, 0, 0.5],
+								[1, 1, 0.5],
+							],
+						},
+						{
+							...base,
+							kind: "text",
+							points: [
+								[0, 0, 0.5],
+								[1, 1, 0.5],
+							],
+						},
+						{
+							...base,
+							kind: "image",
+							src: "",
+							points: [
+								[0, 0, 0.5],
+								[1, 1, 0.5],
+							],
+						},
+					],
+				},
+			}),
+			2,
+		);
 		expect(parsed?.pages).toEqual({});
 	});
 });

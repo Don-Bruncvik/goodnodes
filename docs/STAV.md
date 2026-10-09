@@ -51,7 +51,10 @@
 - Laso: v PDF vlastné (presun, zväčšenie za rohy, vystrihnúť, kopírovať, vložiť, zmazať, farba, duplikovať, späť); na whiteboarde označí prvky a ďalej ich ovláda Excalidraw.
 - Guma v PDF: presná alebo celý ťah, „len zvýrazňovač“. Na whiteboarde maže celé prvky.
 - Zvýrazňovač aj na whiteboarde.
-- V PDF sú text, tvary a obrázok v toolbare zatiaľ neaktívne („Coming soon“).
+- Text v PDF: klepnutie vytvorí textové pole, potiahnutie určí šírku a veľkosť písma (výška = jeden riadok). Klepnutím na existujúci text ho upravíš. Veľkosť S/M/L/XL, písmo, zarovnanie a farba platia aj pre práve písaný text (spoločné nastavenia s whiteboardom).
+- Tvary v PDF: čiara, šípka, obdĺžnik, elipsa, kosoštvorec ťahaním. Sú to obyčajné ťahy, takže ich laso, guma aj späť berú ako ťah.
+- Obrázok v PDF: vyberieš fotku, uloží sa do vaultu (priečinok obrázkov alebo príloh) a vloží sa doprostred strany, hneď označená lasom na presun a zväčšenie.
+- Text a obrázky sa označujú lasom (stred musí byť v slučke), guma ani preškrtnutie ich nemažú. Export „PDF s poznámkami“ ich obsahuje (text ako obrázok v rozlíšení 4×, správne aj na otočených stranách).
 - Posuvník strán je pri listovaní do strán vodorovný dole.
 - Odstránené „New text document“ (Obsidian poznámky už má).
 

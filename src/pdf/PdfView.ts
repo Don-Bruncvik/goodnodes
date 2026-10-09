@@ -11,10 +11,8 @@ import {
 	WorkspaceLeaf,
 } from "obsidian";
 import { PDFDocument } from "pdf-lib";
-import { getStroke } from "perfect-freehand";
-import { strokeOptions } from "../ink/penStyle";
 import type { PenType } from "../ink/penStyle";
-import { recognizeShape } from "../ink/shapes";
+import { recognizeShape, shapePoints } from "../ink/shapes";
 import { strokesInLasso, transformStrokes } from "../ink/lasso";
 import { findScratchedStrokes } from "../scratch/detect";
 import type GoodNodesPlugin from "../main";
@@ -25,7 +23,8 @@ import { displayedToUnrotated, unrotatedToDisplayed } from "./coordinates";
 import { findEraserHits, splitStrokesByEraser } from "./eraser";
 import { PdfHistory } from "./history";
 import type { InkPoint, InkStroke, InkTool, PdfSidecar } from "./model";
-import { newStrokeId } from "./model";
+import { isBoxItem, itemBox, newStrokeId } from "./model";
+import { ImageCache, fontFamily, layoutText, paintItem } from "./items";
 import { parseSidecar, serializeSidecar } from "./sidecar";
 import { deleteSidecarPage, insertSidecarPages } from "./page-ops";
 import { drawPaperTemplate } from "../notebook/paper";
@@ -78,7 +77,7 @@ type PageSlot = {
 	/** Drawn at an old zoom: stays on screen (scaled) until the sharp render replaces it. */
 	stale?: boolean;
 };
-type Tool = InkTool | "eraser" | "lasso";
+type Tool = ToolbarTool;
 type ZoomAnchor = { page: number; x: number; y: number };
 type Gesture = {
 	distance: number;
@@ -192,6 +191,10 @@ export class PdfNotebookView extends FileView {
 	private currentPage = 0;
 	private lastWheelTurn = 0;
 	private notebookMeta?: NotebookMeta;
+	private imageCache: ImageCache;
+	private textEditor: HTMLTextAreaElement | null = null;
+	private editingText: { page: number; old?: InkStroke; item: InkStroke } | null = null;
+	private imageInput: HTMLInputElement;
 	private ownPdfWrite = false;
 	private pdfSignature = "";
 	private pageOperation = false;
@@ -227,12 +230,15 @@ export class PdfNotebookView extends FileView {
 	constructor(leaf: WorkspaceLeaf, plugin: GoodNodesPlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		this.imageCache = new ImageCache(this.app, (src) => this.redrawImage(src));
 		this.toolState = {
 			tool: sessionTool,
 			color: plugin.settings.penColor,
 			width: plugin.settings.penWidth,
 			pen: plugin.settings.penType ?? "fountain",
 		};
+		this.contentEl.toggleClass("tool-text", this.toolState.tool === "text");
+		this.contentEl.toggleClass("tool-shapes", this.toolState.tool === "shapes");
 		this.contentEl.addClass("goodnodes-pdf-root");
 		this.contentEl.toggleClass("is-horizontal", this.horizontal);
 		this.scroller = this.contentEl.createDiv({ cls: "goodnodes-pdf-scroll" });
@@ -243,6 +249,16 @@ export class PdfNotebookView extends FileView {
 		this.register(() => resizeObserver.disconnect());
 		this.pagesEl = this.scroller.createDiv({ cls: "goodnodes-pdf-pages" });
 		this.toolbar = this.contentEl.createDiv({ cls: "goodnodes-pdf-toolbar" });
+		// Tapping the toolbar must not blur the text being edited: size, font and color apply to it.
+		this.toolbar.addEventListener("mousedown", (event) => {
+			if (this.textEditor && !(event.target as Element).closest("input")) event.preventDefault();
+		});
+		this.imageInput = document.createElement("input");
+		this.imageInput.type = "file";
+		this.imageInput.accept = "image/*";
+		this.imageInput.hidden = true;
+		this.contentEl.appendChild(this.imageInput);
+		this.imageInput.onchange = () => void this.insertChosenImage(this.imageInput.files?.[0]);
 		this.indicator = this.contentEl.createDiv({ cls: "goodnodes-pdf-indicator", text: "— / —" });
 		this.scrubber = this.contentEl.createDiv({ cls: "goodnodes-pdf-scrubber" });
 		this.scrubberThumb = this.scrubber.createDiv({ cls: "goodnodes-pdf-scrubber-thumb" });
@@ -380,6 +396,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	async onClose(): Promise<void> {
+		this.commitTextEditor();
 		await this.flushSave();
 		this.goodnodesToolbar?.destroy();
 		this.goodnodesToolbar = null;
@@ -391,7 +408,12 @@ export class PdfNotebookView extends FileView {
 				const tool = this.toolState.tool as ToolbarTool;
 				return {
 					active: tool,
-					color: this.toolState.color,
+					color:
+						tool === "text"
+							? this.plugin.settings.canvasTextColor
+							: tool === "shapes"
+								? this.plugin.settings.shapeColor
+								: this.toolState.color,
 					colors: toolColors(this.plugin.settings, tool),
 					width: this.toolState.width,
 					widths:
@@ -403,15 +425,15 @@ export class PdfNotebookView extends FileView {
 					eraserMode: this.plugin.settings.eraserMode,
 					eraserSize: this.plugin.settings.eraserSize,
 					eraserHighlighterOnly: this.plugin.settings.eraserHighlighterOnly,
-					textSize: 20,
-					textFont: 5,
-					textAlign: "left",
-					shape: "line",
+					textSize: this.plugin.settings.canvasTextSize,
+					textFont: this.plugin.settings.canvasTextFont,
+					textAlign: this.plugin.settings.canvasTextAlign,
+					shape: this.plugin.settings.shapeKind,
 					canUndo: this.history.canUndo,
 					canRedo: this.history.canRedo,
 				};
 			},
-			supports: (tool) => tool !== "text" && tool !== "shapes" && tool !== "image",
+			supports: () => true,
 			leading: (parent) => {
 				const b = this.iconButton(
 					parent,
@@ -422,10 +444,23 @@ export class PdfNotebookView extends FileView {
 				);
 				b.toggleClass("is-active", !!this.sidebar);
 			},
-			select: (tool) => this.selectTool(tool as Tool),
+			select: (tool) => {
+				if (tool === "image") {
+					this.imageInput.click();
+					return;
+				}
+				this.selectTool(tool);
+			},
 			color: (tool, value, index) => {
 				rememberToolColor(this.plugin.settings, tool, index, value);
-				this.applyToolColor(tool === "highlighter" ? "highlighter" : "pen", value);
+				if (tool === "text") {
+					this.plugin.settings.canvasTextColor = value;
+					if (this.editingText) this.editingText.item.color = value;
+					this.applyToolColor("text", value);
+				} else if (tool === "shapes") {
+					this.plugin.settings.shapeColor = value;
+					this.applyToolColor("shapes", value);
+				} else this.applyToolColor(tool === "highlighter" ? "highlighter" : "pen", value);
 				this.scheduleSettingsSave();
 			},
 			width: (tool, value, index) => {
@@ -443,6 +478,20 @@ export class PdfNotebookView extends FileView {
 				if (key === "eraserMode") this.plugin.settings.eraserMode = value as any;
 				if (key === "eraserHighlighterOnly") this.plugin.settings.eraserHighlighterOnly = Boolean(value);
 				if (key === "eraserSize") this.plugin.settings.eraserSize = Number(value);
+				if (key === "textSize") {
+					this.plugin.settings.canvasTextSize = Number(value);
+					if (this.editingText) this.editingText.item.width = Number(value) * 0.6;
+				}
+				if (key === "textFont") {
+					this.plugin.settings.canvasTextFont = Number(value);
+					if (this.editingText) this.editingText.item.font = Number(value);
+				}
+				if (key === "textAlign") {
+					this.plugin.settings.canvasTextAlign = value as any;
+					if (this.editingText) this.editingText.item.align = value as any;
+				}
+				if (key === "shape") this.plugin.settings.shapeKind = value as any;
+				this.refreshEditorStyle();
 				this.scheduleSettingsSave();
 				this.goodnodesToolbar?.refresh();
 			},
@@ -471,6 +520,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private selectTool(tool: Tool): void {
+		if (this.textEditor) this.commitTextEditor();
 		this.clearSelection();
 		sessionTool = tool;
 		this.toolState.tool = tool;
@@ -478,6 +528,8 @@ export class PdfNotebookView extends FileView {
 			tool === "highlighter" ? this.plugin.settings.highlighterColor : this.plugin.settings.penColor;
 		this.toolState.width =
 			tool === "highlighter" ? this.plugin.settings.highlighterWidth : this.plugin.settings.penWidth;
+		this.contentEl.toggleClass("tool-text", tool === "text");
+		this.contentEl.toggleClass("tool-shapes", tool === "shapes");
 		this.updateToolbar();
 	}
 
@@ -551,9 +603,15 @@ export class PdfNotebookView extends FileView {
 			});
 	}
 
-	private applyToolColor(tool: InkTool, color: string): void {
+	private applyToolColor(tool: InkTool | "text" | "shapes", color: string): void {
 		if (tool === "highlighter") {
 			this.plugin.settings.highlighterColor = color;
+			this.toolState.color = color;
+		} else if (tool === "text") {
+			this.plugin.settings.canvasTextColor = color;
+			this.toolState.color = color;
+		} else if (tool === "shapes") {
+			this.plugin.settings.shapeColor = color;
 			this.toolState.color = color;
 		} else {
 			this.plugin.settings.penColor = color;
@@ -562,18 +620,30 @@ export class PdfNotebookView extends FileView {
 		if (this.selected) {
 			const { page, strokes } = this.selected,
 				ids = new Set(strokes.map((s) => s.id));
-			const updated = strokes.map((s) => ({ ...s, color }));
-			this.strokes.set(
-				page,
-				(this.strokes.get(page) ?? []).map((s) =>
-					ids.has(s.id) ? updated.find((item) => item.id === s.id)! : s,
-				),
-			);
-			this.history.push({ page, added: updated, removed: strokes });
-			this.clearSelection();
-			this.changed(page);
+			const updated = strokes.filter((s) => s.kind !== "image").map((s) => ({ ...s, color }));
+			if (updated.length) {
+				this.strokes.set(
+					page,
+					(this.strokes.get(page) ?? []).map((s) =>
+						ids.has(s.id) ? (updated.find((item) => item.id === s.id) ?? s) : s,
+					),
+				);
+				this.history.push({
+					page,
+					added: updated,
+					removed: updated.map((item) => strokes.find((s) => s.id === item.id)!),
+				});
+				if (updated.length === strokes.length) this.clearSelection();
+				else
+					this.showSelection(
+						page,
+						strokes.map((s) => updated.find((item) => item.id === s.id) ?? s),
+					);
+				this.changed(page);
+			}
 		}
 		this.updateToolbar();
+		this.refreshEditorStyle();
 		this.scheduleSettingsSave();
 	}
 
@@ -775,6 +845,7 @@ export class PdfNotebookView extends FileView {
 		addTile.style.height = `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`;
 		addTile.onclick = () => void this.insertBlankPage(this.slots.length);
 		this.updatePagePadding();
+		this.refreshEditorStyle();
 		this.updateSnapping();
 	}
 
@@ -1108,6 +1179,7 @@ export class PdfNotebookView extends FileView {
 			this.updatePagePadding();
 		}
 		this.updatePagePadding();
+		this.refreshEditorStyle();
 		this.applyPendingRestore();
 	}
 
@@ -1127,6 +1199,7 @@ export class PdfNotebookView extends FileView {
 		this.updateAddPageTile();
 		this.updatePagePadding();
 		this.positionSelectionBox();
+		this.refreshEditorStyle();
 		this.applyZoomAnchor(anchor, screenX, screenY);
 		if (this.horizontal && this.zoom <= 1.001) {
 			this.centerPage(anchor.page);
@@ -1182,13 +1255,18 @@ export class PdfNotebookView extends FileView {
 
 	private pointerDown(event: PointerEvent): void {
 		debug.pointer("pdf", event);
+		if ((event.target as Element).closest(".goodnodes-pdf-text-editor")) return;
 		if ((event.target as Element).closest(".goodnodes-pdf-selection-actions, .goodnodes-pdf-paste-bubble")) return;
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
 		// Fingers scroll natively and pinch via TouchEvents (syncPinch); they never draw.
-		if (event.pointerType === "touch") return;
+		if (event.pointerType === "touch") {
+			if (this.textEditor && event.target !== this.textEditor) this.commitTextEditor();
+			return;
+		}
 		this.pointers.set(event.pointerId, event);
 		if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
 		if (event.pointerType === "pen") this.penDown = true;
+		if (this.textEditor && event.target !== this.textEditor) this.commitTextEditor();
 		const selectionBox = (event.target as Element).closest<HTMLElement>(".goodnodes-pdf-selection");
 		if (selectionBox && this.toolState.tool === "lasso" && this.selected) {
 			const point = this.pagePoint(event, this.selected.page);
@@ -1336,12 +1414,249 @@ export class PdfNotebookView extends FileView {
 		this.holdTimer = null;
 		this.snapped = false;
 		this.activeStroke = null;
-		if (tool === "eraser") this.commitEraser(page, points);
+		if (tool === "text") this.finishTextGesture(page, points);
+		else if (tool === "shapes") this.commitShape(page, points);
+		else if (tool === "eraser") this.commitEraser(page, points);
 		else if (tool === "lasso") this.selectLasso(page, points);
-		else this.commitInk(page, points, tool);
+		else if (tool === "pen" || tool === "highlighter") this.commitInk(page, points, tool);
 		// The live layer only exists while a stroke is in progress (saves a full-page canvas per page).
 		const live = this.slots[page]?.live;
 		if (live) live.width = live.height = 0;
+	}
+
+	private finishTextGesture(page: number, points: InkPoint[]): void {
+		const a = points[0],
+			b = points[points.length - 1],
+			slot = this.slots[page];
+		const dragged = Math.hypot(b[0] - a[0], b[1] - a[1]) > 4;
+		if (!dragged) {
+			const existing = (this.strokes.get(page) ?? []).find((item) => {
+				if (item.kind !== "text") return false;
+				const box = itemBox(item);
+				return a[0] >= box.x && a[0] <= box.x + box.width && a[1] >= box.y && a[1] <= box.y + box.height;
+			});
+			if (existing) {
+				this.openTextEditor(page, existing);
+				return;
+			}
+			const available = slot.unrotatedWidth - a[0] - 8;
+			const width = Math.max(60, Math.min(260, available));
+			const size = this.plugin.settings.canvasTextSize * 0.6;
+			this.openTextEditor(page, {
+				id: newStrokeId(),
+				tool: "pen",
+				color: this.plugin.settings.canvasTextColor,
+				width: size,
+				kind: "text",
+				text: "",
+				font: this.plugin.settings.canvasTextFont,
+				align: this.plugin.settings.canvasTextAlign,
+				points: [
+					[a[0], a[1], 0.5],
+					[a[0] + width, a[1] + size * 1.25, 0.5],
+				],
+			});
+			return;
+		}
+		const x = Math.min(a[0], b[0]),
+			y = Math.min(a[1], b[1]);
+		const size = Math.max(6, Math.min(96, Math.abs(b[1] - a[1]) / 1.25));
+		this.openTextEditor(page, {
+			id: newStrokeId(),
+			tool: "pen",
+			color: this.plugin.settings.canvasTextColor,
+			width: size,
+			kind: "text",
+			text: "",
+			font: this.plugin.settings.canvasTextFont,
+			align: this.plugin.settings.canvasTextAlign,
+			points: [
+				[x, y, 0.5],
+				[x + Math.abs(b[0] - a[0]), y + Math.abs(b[1] - a[1]), 0.5],
+			],
+		});
+	}
+
+	private openTextEditor(page: number, item: InkStroke): void {
+		const slot = this.slots[page];
+		this.editingText = {
+			page,
+			old: (this.strokes.get(page) ?? []).find((s) => s.id === item.id),
+			item: { ...item },
+		};
+		const editor = slot.el.createEl("textarea", { cls: "goodnodes-pdf-text-editor" });
+		this.textEditor = editor;
+		editor.value = item.text ?? "";
+		editor.spellcheck = true;
+		editor.style.position = "absolute";
+		editor.style.zIndex = "8";
+		editor.style.resize = "none";
+		this.refreshEditorStyle();
+		editor.addEventListener("input", () => this.refreshEditorStyle());
+		editor.addEventListener("blur", () =>
+			window.setTimeout(() => {
+				if (this.textEditor !== editor) return;
+				if (document.activeElement && this.toolbar.contains(document.activeElement)) return;
+				this.commitTextEditor();
+			}, 0),
+		);
+		editor.addEventListener("keydown", (event) => {
+			if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
+				event.preventDefault();
+				this.commitTextEditor();
+			}
+		});
+		this.drawCommittedInk(page);
+		// Keep focus in the pointerup gesture for the iOS keyboard.
+		editor.focus();
+	}
+
+	private refreshEditorStyle(): void {
+		const editor = this.textEditor,
+			active = this.editingText;
+		if (!editor || !active) return;
+		const { page, item } = active,
+			slot = this.slots[page],
+			box = itemBox(item),
+			scale = this.pageScale * this.zoom;
+		const a = unrotatedToDisplayed(box.x, box.y, rotationInfo(slot));
+		const b = unrotatedToDisplayed(box.x + box.width, box.y + box.height, rotationInfo(slot));
+		editor.style.left = `${Math.min(a[0], b[0]) * scale}px`;
+		editor.style.top = `${Math.min(a[1], b[1]) * scale}px`;
+		editor.style.width = `${Math.abs(b[0] - a[0]) * scale}px`;
+		editor.style.font = `${item.width * scale}px ${fontFamily(item.font)}`;
+		// The font shorthand resets line-height; it must match the 1.25 the canvas uses.
+		editor.style.lineHeight = "1.25";
+		editor.style.color = item.color;
+		editor.style.textAlign = item.align ?? "left";
+		// Grow with the content (the textarea's own wrapping decides the line count).
+		editor.style.height = "0px";
+		editor.style.height = `${Math.max(item.width * 1.25 * scale, editor.scrollHeight)}px`;
+	}
+
+	private commitTextEditor(): void {
+		const editor = this.textEditor,
+			active = this.editingText;
+		if (!editor || !active) return;
+		this.textEditor = null;
+		this.editingText = null;
+		editor.remove();
+		const text = editor.value,
+			page = active.page;
+		const old = active.old;
+		if (!text.trim()) {
+			if (old) {
+				this.strokes.set(
+					page,
+					(this.strokes.get(page) ?? []).filter((s) => s.id !== old.id),
+				);
+				this.history.push({ page, added: [], removed: [old] });
+				this.changed(page);
+			} else this.drawCommittedInk(page);
+			return;
+		}
+		const item = { ...active.item, id: newStrokeId(), text };
+		const box = itemBox(item),
+			measure = document.createElement("canvas").getContext("2d")!;
+		measure.font = `${item.width}px ${fontFamily(item.font)}`;
+		const lines = layoutText(text, box.width, (line) => measure.measureText(line).width);
+		item.points[1][1] = box.y + lines.length * item.width * 1.25;
+		const existing = this.strokes.get(page) ?? [];
+		this.strokes.set(page, [...existing.filter((s) => s.id !== old?.id), item]);
+		if (
+			old &&
+			old.text === item.text &&
+			old.color === item.color &&
+			old.width === item.width &&
+			old.font === item.font &&
+			old.align === item.align
+		) {
+			this.strokes.set(page, existing);
+			this.drawCommittedInk(page);
+			return;
+		}
+		this.history.push({ page, added: [item], removed: old ? [old] : [] });
+		this.changed(page);
+	}
+
+	private commitShape(page: number, points: InkPoint[]): void {
+		if (!points.length) return;
+		const a = points[0],
+			b = points[points.length - 1];
+		if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 3) return;
+		const shape = shapePoints(this.plugin.settings.shapeKind, [a[0], a[1]], [b[0], b[1]]).map(
+			([x, y]) => [x, y, 0.5] as InkPoint,
+		);
+		const item: InkStroke = {
+			id: newStrokeId(),
+			tool: "pen",
+			pen: "ball",
+			color: this.plugin.settings.shapeColor,
+			width: this.plugin.settings.penWidth,
+			points: shape,
+		};
+		this.strokes.set(page, [...(this.strokes.get(page) ?? []), item]);
+		this.history.push({ page, added: [item], removed: [] });
+		this.changed(page);
+	}
+
+	private async insertChosenImage(file?: File): Promise<void> {
+		if (!file) return;
+		this.imageInput.value = "";
+		try {
+			const extension = file.name.split(".").pop()?.toLowerCase() || "png";
+			const name = `GoodNodes image ${Date.now()}.${extension}`;
+			let path: string;
+			if (this.plugin.settings.imageFolder.trim()) {
+				const folder = this.plugin.settings.imageFolder.replace(/\/$/, "");
+				if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+				path = `${folder}/${name}`;
+			} else path = await this.app.fileManager.getAvailablePathForAttachment(name, (this.file as TFile).path);
+			if (this.plugin.settings.imageFolder.trim()) {
+				const stem = path.replace(/\.[^.]+$/, ""),
+					suffix = path.match(/\.[^.]+$/)?.[0] ?? `.${extension}`;
+				let index = 2;
+				while (await this.app.vault.adapter.exists(path)) path = `${stem} ${index++}${suffix}`;
+			}
+			await this.app.vault.createBinary(path, await file.arrayBuffer());
+			const url = URL.createObjectURL(file),
+				image = new Image();
+			await new Promise<void>((resolve, reject) => {
+				image.onload = () => resolve();
+				image.onerror = () => reject(new Error("Could not read image"));
+				image.src = url;
+			});
+			URL.revokeObjectURL(url);
+			const page = this.currentPage,
+				slot = this.slots[page];
+			const width = Math.min(
+				slot.unrotatedWidth * 0.6,
+				(slot.unrotatedHeight * 0.6 * image.naturalWidth) / image.naturalHeight,
+			);
+			const height = (width * image.naturalHeight) / image.naturalWidth;
+			const x = (slot.unrotatedWidth - width) / 2,
+				y = (slot.unrotatedHeight - height) / 2;
+			const item: InkStroke = {
+				id: newStrokeId(),
+				tool: "pen",
+				color: "#ffffff",
+				width: 1,
+				kind: "image",
+				src: path,
+				points: [
+					[x, y, 0.5],
+					[x + width, y + height, 0.5],
+				],
+			};
+			this.strokes.set(page, [...(this.strokes.get(page) ?? []), item]);
+			this.history.push({ page, added: [item], removed: [] });
+			this.changed(page);
+			this.selectTool("lasso");
+			this.showSelection(page, [item]);
+			this.drawCommittedInk(page);
+		} catch (error) {
+			new Notice(`Could not insert image: ${String(error)}`);
+		}
 	}
 
 	private pageAt(event: PointerEvent): [number, InkPoint] | null {
@@ -1373,10 +1688,12 @@ export class PdfNotebookView extends FileView {
 		};
 		const existing = this.strokes.get(page) ?? [];
 		if (tool === "pen" && this.plugin.settings.scratchEnabled) {
-			const candidates = existing.map((item) => ({
-				id: item.id,
-				points: item.points.map(([x, y]) => ({ x, y })),
-			}));
+			const candidates = existing
+				.filter((item) => !isBoxItem(item))
+				.map((item) => ({
+					id: item.id,
+					points: item.points.map(([x, y]) => ({ x, y })),
+				}));
 			const ids = findScratchedStrokes(
 				points.map(([x, y]) => ({ x, y })),
 				candidates,
@@ -1406,9 +1723,10 @@ export class PdfNotebookView extends FileView {
 
 	private commitEraser(page: number, points: InkPoint[]): void {
 		const existing = this.strokes.get(page) ?? [];
+		const ink = existing.filter((s) => !isBoxItem(s));
 		const candidates = this.plugin.settings.eraserHighlighterOnly
-			? existing.filter((s) => s.tool === "highlighter")
-			: existing;
+			? ink.filter((s) => s.tool === "highlighter")
+			: ink;
 		if (this.plugin.settings.eraserMode === "precise") {
 			const result = splitStrokesByEraser(
 				points,
@@ -1518,18 +1836,24 @@ export class PdfNotebookView extends FileView {
 		const selection = this.selected;
 		if (!selection) return;
 		const slot = this.slots[selection.page];
-		const points = selection.strokes.flatMap((stroke) =>
-			stroke.points.map((p) => unrotatedToDisplayed(p[0], p[1], rotationInfo(slot))),
-		);
+		const points = selection.strokes.flatMap((stroke) => {
+			const margin = isBoxItem(stroke) ? 4 : stroke.width / 2 + 4;
+			return stroke.points.flatMap((p) => {
+				const [x, y] = unrotatedToDisplayed(p[0], p[1], rotationInfo(slot));
+				return [
+					[x - margin, y - margin],
+					[x + margin, y + margin],
+				];
+			});
+		});
 		if (!points.length) return;
-		const margin = Math.max(...selection.strokes.map((stroke) => stroke.width)) / 2 + 4;
 		const xs = points.map((p) => p[0]),
 			ys = points.map((p) => p[1]);
 		const display = {
-			x: Math.min(...xs) - margin,
-			y: Math.min(...ys) - margin,
-			width: Math.max(...xs) - Math.min(...xs) + margin * 2,
-			height: Math.max(...ys) - Math.min(...ys) + margin * 2,
+			x: Math.min(...xs),
+			y: Math.min(...ys),
+			width: Math.max(...xs) - Math.min(...xs),
+			height: Math.max(...ys) - Math.min(...ys),
 		};
 		selection.display = display;
 		const scale = this.pageScale * this.zoom;
@@ -1544,14 +1868,16 @@ export class PdfNotebookView extends FileView {
 	private recolorSelection(color: string): void {
 		const selection = this.selected;
 		if (!selection) return;
-		const ids = new Set(selection.strokes.map((stroke) => stroke.id));
-		const recolored = selection.strokes.map((stroke) => ({ ...stroke, id: newStrokeId(), color }));
+		const recolorable = selection.strokes.filter((stroke) => stroke.kind !== "image");
+		if (!recolorable.length) return;
+		const ids = new Set(recolorable.map((stroke) => stroke.id));
+		const recolored = recolorable.map((stroke) => ({ ...stroke, id: newStrokeId(), color }));
 		this.strokes.set(selection.page, [
 			...(this.strokes.get(selection.page) ?? []).filter((stroke) => !ids.has(stroke.id)),
 			...recolored,
 		]);
-		this.history.push({ page: selection.page, added: recolored, removed: selection.strokes });
-		selection.strokes = recolored;
+		this.history.push({ page: selection.page, added: recolored, removed: recolorable });
+		selection.strokes = [...selection.strokes.filter((stroke) => stroke.kind === "image"), ...recolored];
 		this.changed(selection.page);
 	}
 
@@ -1619,7 +1945,9 @@ export class PdfNotebookView extends FileView {
 		if (!canvas) return;
 		const ctx = canvas.getContext("2d")!;
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		for (const stroke of this.strokes.get(page) ?? []) this.paintStroke(ctx, stroke, canvas);
+		for (const stroke of this.strokes.get(page) ?? []) {
+			if (stroke.id !== this.editingText?.item.id) this.paintStroke(ctx, stroke, canvas);
+		}
 	}
 
 	private drawLive(page: number): void {
@@ -1672,6 +2000,45 @@ export class PdfNotebookView extends FileView {
 			ctx.setLineDash([]);
 			return;
 		}
+		if (this.activeStroke.tool === "text") {
+			const a = this.activeStroke.points[0],
+				b = this.activeStroke.points[this.activeStroke.points.length - 1];
+			const [ax, ay] = unrotatedToDisplayed(a[0], a[1], rotationInfo(slot));
+			const [bx, by] = unrotatedToDisplayed(b[0], b[1], rotationInfo(slot));
+			const scale = this.pageScale * this.zoom,
+				factor = canvas.width / (slot.width * scale);
+			ctx.setLineDash([5 * factor, 4 * factor]);
+			ctx.strokeStyle =
+				getComputedStyle(this.contentEl).getPropertyValue("--interactive-accent").trim() || "#7c5cff";
+			ctx.lineWidth = 1.5 * factor;
+			ctx.strokeRect(
+				Math.min(ax, bx) * scale * factor,
+				Math.min(ay, by) * scale * factor,
+				Math.abs(bx - ax) * scale * factor,
+				Math.abs(by - ay) * scale * factor,
+			);
+			ctx.setLineDash([]);
+			return;
+		}
+		if (this.activeStroke.tool === "shapes") {
+			const a = this.activeStroke.points[0],
+				b = this.activeStroke.points[this.activeStroke.points.length - 1];
+			const preview: InkStroke = {
+				id: "shape-live",
+				tool: "pen",
+				pen: "ball",
+				color: this.plugin.settings.shapeColor,
+				width: this.plugin.settings.penWidth,
+				points: shapePoints(this.plugin.settings.shapeKind, [a[0], a[1]], [b[0], b[1]]).map(([x, y]) => [
+					x,
+					y,
+					0.5,
+				]),
+			};
+			this.paintStroke(ctx, preview, canvas);
+			return;
+		}
+		if (this.activeStroke.tool !== "pen" && this.activeStroke.tool !== "highlighter") return;
 		const stroke: InkStroke = {
 			id: "live",
 			tool: this.activeStroke.tool,
@@ -1685,30 +2052,17 @@ export class PdfNotebookView extends FileView {
 	private paintStroke(ctx: CanvasRenderingContext2D, stroke: InkStroke, canvas: HTMLCanvasElement): void {
 		const slot = this.slots[Number(canvas.parentElement?.dataset.page)];
 		const scale = this.pageScale * this.zoom;
-		const factor = canvas.width / ((slot?.width ?? this.baseWidth) * scale);
-		const points = stroke.points.map(([x, y, pressure]) => {
-			const [displayX, displayY] = slot ? unrotatedToDisplayed(x, y, rotationInfo(slot)) : [x, y];
-			return [displayX * scale * factor, displayY * scale * factor, pressure];
-		});
-		const width = stroke.width * scale * factor;
-		const outline = getStroke(points, {
-			...strokeOptions(stroke.tool, stroke.pen, width),
-		});
-		if (!outline.length) return;
-		ctx.beginPath();
-		ctx.moveTo(outline[0][0], outline[0][1]);
-		for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
-		ctx.closePath();
-		if (stroke.tool === "highlighter") {
-			ctx.globalCompositeOperation = "multiply";
-			ctx.globalAlpha = 0.35;
-		}
-		ctx.fillStyle = stroke.color;
-		ctx.fill();
-		if (stroke.tool === "highlighter") {
-			ctx.globalCompositeOperation = "source-over";
-			ctx.globalAlpha = 1;
-		}
+		const pixels = scale * (canvas.width / ((slot?.width ?? this.baseWidth) * scale));
+		paintItem(
+			ctx,
+			stroke,
+			(x, y) => {
+				const [displayX, displayY] = slot ? unrotatedToDisplayed(x, y, rotationInfo(slot)) : [x, y];
+				return [displayX * pixels, displayY * pixels];
+			},
+			pixels,
+			this.imageCache,
+		);
 	}
 
 	private blockStylusTouch(event: TouchEvent): void {
@@ -2132,23 +2486,32 @@ export class PdfNotebookView extends FileView {
 	private drawThumbnailInk(index: number, canvas: HTMLCanvasElement): void {
 		const ctx = canvas.getContext("2d")!;
 		const scale = canvas.width / this.slots[index].width;
-		for (const stroke of this.strokes.get(index) ?? []) {
-			const slot = this.slots[index];
-			const points = stroke.points.map(([x, y, pressure]) => {
-				const [screenX, screenY] = unrotatedToDisplayed(x, y, rotationInfo(slot));
-				return [screenX * scale, screenY * scale, pressure];
-			});
-			const outline = getStroke(points, strokeOptions(stroke.tool, stroke.pen, stroke.width * scale));
-			if (!outline.length) continue;
-			ctx.globalAlpha = stroke.tool === "highlighter" ? 0.35 : 1;
-			ctx.fillStyle = stroke.color;
-			ctx.beginPath();
-			ctx.moveTo(outline[0][0], outline[0][1]);
-			for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
-			ctx.closePath();
-			ctx.fill();
+		const slot = this.slots[index];
+		for (const stroke of this.strokes.get(index) ?? [])
+			paintItem(
+				ctx,
+				stroke,
+				(x, y) => {
+					const [displayX, displayY] = unrotatedToDisplayed(x, y, rotationInfo(slot));
+					return [displayX * scale, displayY * scale];
+				},
+				scale,
+				this.imageCache,
+			);
+	}
+
+	private redrawImage(src: string): void {
+		for (const [page, items] of this.strokes) {
+			if (!items.some((item) => item.kind === "image" && item.src === src)) continue;
+			this.drawCommittedInk(page);
+			const canvas = this.sidebarContent?.querySelector<HTMLCanvasElement>(
+				`.goodnodes-pdf-thumbnail[data-page="${page}"] canvas`,
+			);
+			if (canvas) {
+				canvas.remove();
+				void this.renderThumbnail(page);
+			}
 		}
-		ctx.globalAlpha = 1;
 	}
 
 	/** Thumbnails within the observer margin; these are never released. */
@@ -2541,7 +2904,58 @@ export class PdfNotebookView extends FileView {
 		if (!file) return;
 		try {
 			const source = await this.app.vault.readBinary(file);
-			const bytes = await createAnnotatedPdf(source, this.strokes);
+			const bytes = await createAnnotatedPdf(source, this.strokes, {
+				renderText: async (item, page) => {
+					// Same orientation as on screen; export.ts turns it back for rotated pages.
+					const box = itemBox(item),
+						info = rotationInfo(this.slots[page]),
+						a = unrotatedToDisplayed(box.x, box.y, info),
+						b = unrotatedToDisplayed(box.x + box.width, box.y + box.height, info),
+						left = Math.min(a[0], b[0]),
+						top = Math.min(a[1], b[1]),
+						canvas = document.createElement("canvas");
+					canvas.width = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) * 4));
+					canvas.height = Math.max(1, Math.ceil(Math.abs(b[1] - a[1]) * 4));
+					paintItem(
+						canvas.getContext("2d")!,
+						item,
+						(x, y) => {
+							const [u, v] = unrotatedToDisplayed(x, y, info);
+							return [(u - left) * 4, (v - top) * 4];
+						},
+						4,
+						this.imageCache,
+					);
+					const blob = await new Promise<Blob>((resolve) =>
+						canvas.toBlob((value) => resolve(value!), "image/png"),
+					);
+					return new Uint8Array(await blob.arrayBuffer());
+				},
+				readImage: async (src) => {
+					const file = this.app.vault.getAbstractFileByPath(src);
+					if (!(file instanceof TFile)) return null;
+					const bytes = new Uint8Array(await this.app.vault.readBinary(file));
+					const ext = src.split(".").pop()?.toLowerCase();
+					if (ext === "png") return { bytes, mime: "image/png" };
+					if (ext === "jpg" || ext === "jpeg") return { bytes, mime: "image/jpeg" };
+					const image = new Image();
+					const url = URL.createObjectURL(new Blob([bytes]));
+					await new Promise<void>((resolve, reject) => {
+						image.onload = () => resolve();
+						image.onerror = () => reject(new Error("Image conversion failed"));
+						image.src = url;
+					});
+					URL.revokeObjectURL(url);
+					const canvas = document.createElement("canvas");
+					canvas.width = image.naturalWidth;
+					canvas.height = image.naturalHeight;
+					canvas.getContext("2d")!.drawImage(image, 0, 0);
+					const blob = await new Promise<Blob>((resolve) =>
+						canvas.toBlob((value) => resolve(value!), "image/png"),
+					);
+					return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: "image/png" };
+				},
+			});
 			const stem = `${file.parent?.path ? `${file.parent.path}/` : ""}${file.basename} (annotated)`;
 			let path = `${stem}.pdf`,
 				suffix = 2;
@@ -2557,6 +2971,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private clearDocument(): void {
+		this.commitTextEditor();
 		this.clearSelection();
 		this.disposed = true;
 		this.pendingRestore = null;

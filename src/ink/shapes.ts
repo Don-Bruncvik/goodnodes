@@ -1,5 +1,59 @@
 export type RecognizedShape = { kind: "line" | "ellipse" | "rectangle" | "triangle"; points: [number, number][] };
 
+export type ToolbarShape = "line" | "arrow" | "rectangle" | "ellipse" | "diamond";
+
+export function shapePoints(kind: ToolbarShape, a: [number, number], b: [number, number]): [number, number][] {
+	const [x1, y1] = a,
+		[x2, y2] = b;
+	let points: [number, number][];
+	if (kind === "line") points = [a, b];
+	else if (kind === "arrow") {
+		const angle = Math.atan2(y2 - y1, x2 - x1),
+			length = Math.hypot(x2 - x1, y2 - y1);
+		const head = Math.min(16, length * 0.3);
+		const h1: [number, number] = [
+			x2 - head * Math.cos(angle - (28 * Math.PI) / 180),
+			y2 - head * Math.sin(angle - (28 * Math.PI) / 180),
+		];
+		const h2: [number, number] = [
+			x2 - head * Math.cos(angle + (28 * Math.PI) / 180),
+			y2 - head * Math.sin(angle + (28 * Math.PI) / 180),
+		];
+		points = [a, b, h1, b, h2];
+	} else if (kind === "rectangle")
+		points = [
+			[x1, y1],
+			[x2, y1],
+			[x2, y2],
+			[x1, y2],
+			[x1, y1],
+		];
+	else if (kind === "diamond")
+		points = [
+			[(x1 + x2) / 2, y1],
+			[x2, (y1 + y2) / 2],
+			[(x1 + x2) / 2, y2],
+			[x1, (y1 + y2) / 2],
+			[(x1 + x2) / 2, y1],
+		];
+	else
+		points = Array.from({ length: 65 }, (_, i) => [
+			(x1 + x2) / 2 + ((x2 - x1) / 2) * Math.cos((i * Math.PI * 2) / 64),
+			(y1 + y2) / 2 + ((y2 - y1) / 2) * Math.sin((i * Math.PI * 2) / 64),
+		]);
+	const dense: [number, number][] = [points[0]];
+	for (let i = 1; i < points.length; i++) {
+		const prev = points[i - 1],
+			next = points[i],
+			steps = Math.max(1, Math.ceil(Math.hypot(next[0] - prev[0], next[1] - prev[1]) / 4));
+		for (let j = 1; j <= steps; j++) {
+			const t = j / steps;
+			dense.push([prev[0] + (next[0] - prev[0]) * t, prev[1] + (next[1] - prev[1]) * t]);
+		}
+	}
+	return dense;
+}
+
 export function recognizeShape(input: [number, number][]): RecognizedShape | null {
 	if (input.length < 5) return null;
 	const points = input.filter(

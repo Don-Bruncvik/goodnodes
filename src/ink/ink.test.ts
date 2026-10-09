@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { recognizeShape } from "./shapes";
+import { recognizeShape, shapePoints } from "./shapes";
 import { boundsOf, pointInPolygon, strokesInLasso, transformStrokes } from "./lasso";
 import { splitStrokesByEraser } from "../pdf/eraser";
 import type { InkStroke } from "../pdf/model";
 import { strokeOptions } from "./penStyle";
+import { layoutText } from "../pdf/items";
 
 const stroke = (id: string, points: [number, number, number][]): InkStroke => ({
 	id,
@@ -124,5 +125,36 @@ describe("ink recognition and geometry", () => {
 			2,
 		);
 		expect(result).toEqual({ removed: [], added: [] });
+	});
+	it("selects box items by center and creates dense toolbar shapes", () => {
+		const box: InkStroke = {
+			...stroke("box", [
+				[2, 2, 0.5],
+				[20, 20, 0.5],
+			]),
+			kind: "text",
+			text: "x",
+		};
+		expect(
+			strokesInLasso(
+				[
+					[9, 9],
+					[13, 9],
+					[13, 13],
+					[9, 13],
+				],
+				[box],
+			),
+		).toEqual([box]);
+		const line = shapePoints("line", [0, 0], [20, 0]);
+		expect(line[0]).toEqual([0, 0]);
+		expect(line[line.length - 1]).toEqual([20, 0]);
+		expect(line.every((p, i) => !i || Math.hypot(p[0] - line[i - 1][0], p[1] - line[i - 1][1]) <= 4)).toBe(true);
+		expect(shapePoints("ellipse", [0, 0], [40, 20]).length).toBeGreaterThanOrEqual(65);
+	});
+	it("wraps text at words and breaks oversized words", () => {
+		const measure = (text: string) => text.length;
+		expect(layoutText("one two\nthree", 7, measure)).toEqual(["one two", "three"]);
+		expect(layoutText("abcdefgh", 3, measure)).toEqual(["abc", "def", "gh"]);
 	});
 });

@@ -56,6 +56,74 @@
 	overflow: hidden;
 	touch-action: pan-x pan-y;
 }
+.goodnodes-pdf-root.tool-text .goodnodes-pdf-page {
+	cursor: text;
+}
+.goodnodes-pdf-root.tool-shapes .goodnodes-pdf-page {
+	cursor: crosshair;
+}
+/* Beats Obsidian's textarea / textarea:focus field styles; an outline instead of a border
+   keeps the wrap width equal to the box the text is drawn in. */
+.goodnodes-pdf-page textarea.goodnodes-pdf-text-editor,
+.goodnodes-pdf-page textarea.goodnodes-pdf-text-editor:focus,
+.goodnodes-pdf-page textarea.goodnodes-pdf-text-editor:hover {
+	box-sizing: border-box;
+	min-height: 1.25em;
+	margin: 0;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	outline: 1px dashed var(--interactive-accent);
+	outline-offset: 2px;
+	background: transparent;
+	box-shadow: none;
+	line-height: 1.25;
+	white-space: pre-wrap;
+	overflow: hidden;
+	-webkit-user-select: text;
+	user-select: text;
+	-webkit-appearance: none;
+	appearance: none;
+}
+.goodnodes-pdf-add-page {
+	scroll-snap-align: center;
+	scroll-snap-stop: always;
+}
+.goodnodes-pdf-page {
+	position: relative;
+	flex: 0 0 auto;
+	background: #fff;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.24);
+	overflow: hidden;
+	touch-action: pan-x pan-y;
+}
+.goodnodes-pdf-root.tool-text .goodnodes-pdf-page {
+	cursor: text;
+}
+.goodnodes-pdf-root.tool-shapes .goodnodes-pdf-page {
+	cursor: crosshair;
+}
+.goodnodes-pdf-text-editor {
+	box-sizing: border-box;
+	min-height: 1.25em;
+	padding: 0;
+	border: 1px dashed var(--interactive-accent);
+	border-radius: 2px;
+	background: transparent;
+	line-height: 1.25;
+	white-space: pre-wrap;
+	overflow: hidden;
+	-webkit-user-select: text;
+	user-select: text;
+	-webkit-appearance: none;
+	appearance: none;
+	outline: none;
+	box-shadow: none;
+}
+.goodnodes-pdf-text-editor:focus {
+	outline: none;
+	box-shadow: none;
+}
 .goodnodes-pdf-add-page {
 	flex: 0 0 auto;
 	margin: 0 0 8px;

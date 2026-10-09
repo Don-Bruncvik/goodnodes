@@ -36,6 +36,7 @@ export class GoodNodesHelpModal extends Modal {
 		section("Notebooks and PDFs", [
 			"Right-click a PDF → Open as GoodNodes notebook (or turn on “Open PDFs in GoodNodes” in settings).",
 			"“…” menu: add, insert or delete pages, insert the pages of another PDF, export with your notes.",
+			"Text: tap to type, drag to set the box width and font size; tap a text again to edit it. Shapes: drag a line, arrow, rectangle, ellipse or diamond. Image: pick a photo, then move or resize it with the lasso.",
 			"Pages sidebar: thumbnails, outline and bookmarks. Drag the bar on the right edge to scrub through pages.",
 			"Notes are stored next to the PDF (“…pdf.goodnodes.json”); an imported PDF itself only changes when you add or delete pages.",
 		]);

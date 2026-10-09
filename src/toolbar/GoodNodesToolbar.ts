@@ -123,15 +123,11 @@ export class GoodNodesToolbar {
 			const button = this.button(this.tools, icon, label, "goodnodes-toolbar-tool");
 			button.dataset.tool = tool;
 			button.toggleClass("is-active", state.active === tool);
-			if (!this.host.supports(tool)) {
-				button.disabled = true;
-				button.title = "Coming soon in PDF notebooks";
-			} else
-				button.onclick = () => {
-					if (state.active === tool) this.host.activateAgain?.(tool);
-					else this.host.select(tool);
-					this.render();
-				};
+			button.onclick = () => {
+				if (state.active === tool) this.host.activateAgain?.(tool);
+				else this.host.select(tool);
+				this.render();
+			};
 		}
 		this.sep(this.tools);
 		this.renderOptions(state);

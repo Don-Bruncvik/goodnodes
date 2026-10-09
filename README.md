@@ -16,13 +16,13 @@ Handwritten notebooks for Obsidian, made for the iPad and Apple Pencil. A GoodNo
 | **Scratch out to erase**: zig-zag over a word to delete it | ✅ | ✅ |
 | Undo / redo (scratch-out undoes in one step) | ✅ | ✅ |
 | Paper background: blank, grid, dots | ✅ | – |
-| One GoodNotes-style toolbar: lasso, pen, highlighter, eraser, text, shapes, image + the active tool's options inline | ✅ | ✅ (text, shapes, image coming) |
+| One GoodNotes-style toolbar: lasso, pen, highlighter, eraser, text, shapes, image + the active tool's options inline | ✅ | ✅ |
 | Pen types fountain / ball / brush, 3 thicknesses, 3 basic + 2 custom colors | ✅ | ✅ |
 | Draw and hold: a drawn line, circle, rectangle or triangle snaps to a perfect shape | ✅ | ✅ |
 | Lasso: select, move, resize, recolor, cut / copy / paste, duplicate, delete | ✅ (Excalidraw handles) | ✅ |
 | Eraser: precise or whole stroke, highlighter only | whole elements | ✅ |
 | Fingers draw when no Apple Pencil is used (automatic, or always / never) | ✅ | – |
-| Text, shapes, arrows, images | ✅ | – |
+| Text, shapes, arrows, images | ✅ | ✅ |
 | Pages sidebar: thumbnails, outline, bookmarks | – | ✅ |
 | Add / insert / delete pages, insert another PDF | – | ✅ |
 | Insert a PDF (pages as images) | ✅ | – |

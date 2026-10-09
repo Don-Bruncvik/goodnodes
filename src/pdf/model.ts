@@ -9,6 +9,26 @@ export interface InkStroke {
 	width: number;
 	pen?: PenType;
 	points: InkPoint[];
+	kind?: "text" | "image";
+	text?: string;
+	font?: number;
+	align?: "left" | "center" | "right";
+	src?: string;
+}
+
+export function isBoxItem(stroke: InkStroke): boolean {
+	return stroke.kind === "text" || stroke.kind === "image";
+}
+
+export function itemBox(stroke: InkStroke): { x: number; y: number; width: number; height: number } {
+	const a = stroke.points[0] ?? [0, 0, 0],
+		b = stroke.points[1] ?? a;
+	return {
+		x: Math.min(a[0], b[0]),
+		y: Math.min(a[1], b[1]),
+		width: Math.abs(a[0] - b[0]),
+		height: Math.abs(a[1] - b[1]),
+	};
 }
 
 export interface PdfSidecar {

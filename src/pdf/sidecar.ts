@@ -19,6 +19,11 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 				points: stroke.points.map(
 					(point) => [round(point[0]), round(point[1]), clampPressure(point[2])] as [number, number, number],
 				),
+				...(stroke.kind ? { kind: stroke.kind } : {}),
+				...(stroke.text !== undefined ? { text: stroke.text } : {}),
+				...(stroke.font !== undefined ? { font: stroke.font } : {}),
+				...(stroke.align ? { align: stroke.align } : {}),
+				...(stroke.src ? { src: stroke.src } : {}),
 			}));
 			if (strokes.length) pages[key] = strokes;
 		}
@@ -89,7 +94,7 @@ export function serializeSidecar(data: PdfSidecar): string {
 function isStroke(value: unknown): value is InkStroke {
 	if (!value || typeof value !== "object") return false;
 	const stroke = value as InkStroke;
-	return (
+	const valid =
 		typeof stroke.id === "string" &&
 		(stroke.tool === "pen" || stroke.tool === "highlighter") &&
 		(stroke.pen === undefined || stroke.pen === "fountain" || stroke.pen === "ball" || stroke.pen === "brush") &&
@@ -106,8 +111,16 @@ function isStroke(value: unknown): value is InkStroke {
 				Number.isFinite(point[0]) &&
 				Number.isFinite(point[1]) &&
 				Number.isFinite(point[2]),
-		)
-	);
+		);
+	if (!valid) return false;
+	if (stroke.kind !== undefined && stroke.kind !== "text" && stroke.kind !== "image") return false;
+	if (stroke.kind && stroke.points.length < 2) return false;
+	if (stroke.kind && stroke.tool !== "pen") return false;
+	if (stroke.kind === "text" && typeof stroke.text !== "string") return false;
+	if (stroke.kind === "image" && (typeof stroke.src !== "string" || !stroke.src.trim())) return false;
+	if (stroke.font !== undefined && !Number.isFinite(stroke.font)) return false;
+	if (stroke.align !== undefined && !["left", "center", "right"].includes(stroke.align)) return false;
+	return true;
 }
 
 function round(value: number): number {

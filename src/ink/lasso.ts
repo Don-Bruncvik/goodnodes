@@ -1,4 +1,4 @@
-import { newStrokeId, type InkStroke } from "../pdf/model";
+import { isBoxItem, itemBox, newStrokeId, type InkStroke } from "../pdf/model";
 
 export function pointInPolygon(point: [number, number], polygon: [number, number][]): boolean {
 	let inside = false;
@@ -14,11 +14,16 @@ export function pointInPolygon(point: [number, number], polygon: [number, number
 	return inside;
 }
 export function strokesInLasso(polygon: [number, number][], strokes: InkStroke[], minFraction = 0.5): InkStroke[] {
-	return strokes.filter(
-		(stroke) =>
+	return strokes.filter((stroke) => {
+		if (isBoxItem(stroke)) {
+			const box = itemBox(stroke);
+			return pointInPolygon([box.x + box.width / 2, box.y + box.height / 2], polygon);
+		}
+		return (
 			stroke.points.filter(([x, y]) => pointInPolygon([x, y], polygon)).length / stroke.points.length >=
-			minFraction,
-	);
+			minFraction
+		);
+	});
 }
 export function boundsOf(strokes: InkStroke[]): { x: number; y: number; width: number; height: number } | null {
 	const points = strokes.flatMap((s) => s.points);
@@ -40,7 +45,7 @@ export function transformStrokes(
 	return strokes.map((stroke) => ({
 		...stroke,
 		id: newStrokeId(),
-		width: stroke.width * scale,
+		width: stroke.kind === "image" ? 1 : stroke.width * scale,
 		points: stroke.points.map(([x, y, p]) => [
 			originX + (x - originX) * scale + dx,
 			originY + (y - originY) * scale + dy,

@@ -1,9 +1,10 @@
-import { newStrokeId, type InkPoint, type InkStroke } from "./model";
+import { isBoxItem, newStrokeId, type InkPoint, type InkStroke } from "./model";
 
 export function findEraserHits(path: InkPoint[], strokes: InkStroke[], radius = 8): string[] {
 	if (!path.length) return [];
 	const radiusSquared = radius * radius;
 	return strokes
+		.filter((stroke) => !isBoxItem(stroke))
 		.filter((stroke) => {
 			for (const point of stroke.points)
 				if (
@@ -42,7 +43,7 @@ export function splitStrokesByEraser(
 	if (!path.length) return { removed: [], added: [] };
 	const removed: InkStroke[] = [],
 		added: InkStroke[] = [];
-	for (const stroke of strokes) {
+	for (const stroke of strokes.filter((item) => !isBoxItem(item))) {
 		const samples: InkPoint[] = [];
 		for (let i = 0; i < stroke.points.length; i++) {
 			const a = stroke.points[i - 1],

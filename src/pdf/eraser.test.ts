@@ -55,4 +55,30 @@ describe("PDF stroke eraser", () => {
 			),
 		).toEqual(["long"]);
 	});
+
+	it("ignores text and image box items", () => {
+		const boxItems: InkStroke[] = [
+			{
+				...stroke,
+				id: "text",
+				kind: "text",
+				text: "hello",
+				points: [
+					[0, 0, 0.5],
+					[40, 40, 0.5],
+				],
+			},
+			{
+				...stroke,
+				id: "image",
+				kind: "image",
+				src: "a.png",
+				points: [
+					[0, 0, 0.5],
+					[40, 40, 0.5],
+				],
+			},
+		];
+		expect(findEraserHits([[20, 20, 0.5]], boxItems, 100)).toEqual([]);
+	});
 });

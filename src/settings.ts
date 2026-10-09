@@ -47,6 +47,8 @@ export interface GoodNodesSettings {
 	pdfPageDirection: "horizontal" | "vertical";
 	/** Folder for images pasted into canvases; empty = Obsidian's attachment setting. */
 	imageFolder: string;
+	shapeKind: "line" | "arrow" | "rectangle" | "ellipse" | "diamond";
+	shapeColor: string;
 	showDebugRibbon: boolean;
 	/** Canvas library items ("Add to library"), shared by all notebooks. Not shown in the tab. */
 	library: unknown[];
@@ -87,6 +89,8 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	openPdfByDefault: false,
 	pdfPageDirection: "horizontal",
 	imageFolder: "",
+	shapeKind: "rectangle",
+	shapeColor: "#1e1e1e",
 	showDebugRibbon: false,
 	library: [],
 };
