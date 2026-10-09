@@ -31,6 +31,25 @@ import "./pdf.css";
 export const PDF_VIEW_TYPE = "goodnodes-pdf";
 type PdfDoc = any;
 type PdfPage = any;
+/**
+ * The size most pages have, used for every placeholder before a page is loaded.
+ * Taking page 1 alone breaks books whose cover differs: every later page then
+ * resized while scrolling, and the view jumped.
+ */
+async function typicalPageSize(doc: any): Promise<{ width: number; height: number }> {
+	const count: number = doc.numPages;
+	const sample = [...new Set([1, 2, 3, 4, 5, 6, Math.ceil(count / 2), count])].filter((n) => n >= 1 && n <= count);
+	const tally = new Map<string, { width: number; height: number; n: number }>();
+	for (const n of sample) {
+		const viewport = (await doc.getPage(n)).getViewport({ scale: 1 });
+		const key = `${Math.round(viewport.width)}x${Math.round(viewport.height)}`;
+		const entry = tally.get(key) ?? { width: viewport.width, height: viewport.height, n: 0 };
+		entry.n++;
+		tally.set(key, entry);
+	}
+	return [...tally.values()].sort((a, b) => b.n - a.n)[0];
+}
+
 /** Rotation info in the convention of coordinates.ts (unrotated page size). */
 function rotationInfo(slot: PageSlot): { width: number; height: number; rotation: number } {
 	return { width: slot.unrotatedWidth, height: slot.unrotatedHeight, rotation: slot.rotation };
@@ -93,7 +112,9 @@ export class PdfNotebookView extends FileView {
 	private sidebar: HTMLElement | null = null;
 	private sidebarContent: HTMLElement | null = null;
 	private sidebarTab: SidebarTab = "pages";
-	private restoredSidebar: SidebarTab | null = null;
+	/** Saved sidebar state: a tab, "closed" (the user closed it), or null (never set). */
+	private restoredSidebar: SidebarTab | "closed" | null = null;
+	private sidebarClosedByUser = false;
 	private popover: HTMLElement | null = null;
 	private settingsTimer: number | null = null;
 	private bookmarks = new Set<number>();
@@ -126,7 +147,6 @@ export class PdfNotebookView extends FileView {
 	private pinch: Gesture | null = null;
 	private penUntil = 0;
 	private penDown = false;
-	private ignoredTouches = new Set<number>();
 	private jumpStarted = new Map<number, number>();
 	private disposed = false;
 	private loadStartedAt = 0;
@@ -143,11 +163,19 @@ export class PdfNotebookView extends FileView {
 	private ownPdfWrite = false;
 	private pdfSignature = "";
 	private pageOperation = false;
-	private touchStart = (e: TouchEvent) => this.blockStylusTouch(e);
+	// Fingers are handled with TouchEvents, not PointerEvents: when iOS starts native
+	// scrolling it cancels the touch pointers, and pointer-based finger tracking went
+	// out of sync (one finger then zoomed instead of scrolling). `touches` always lists
+	// exactly the fingers on the glass.
+	private touchStart = (event: TouchEvent) => {
+		this.blockStylusTouch(event);
+		this.syncPinch(event);
+	};
 	private touchMove = (event: TouchEvent) => {
 		this.blockStylusTouch(event);
-		if (this.pointers.size >= 2) event.preventDefault();
+		this.syncPinch(event);
 	};
+	private touchEnd = (event: TouchEvent) => this.syncPinch(event);
 
 	constructor(leaf: WorkspaceLeaf, plugin: GoodNodesPlugin) {
 		super(leaf);
@@ -203,6 +231,8 @@ export class PdfNotebookView extends FileView {
 		this.contentEl.tabIndex = 0;
 		this.scroller.addEventListener("touchstart", this.touchStart, { passive: false });
 		this.scroller.addEventListener("touchmove", this.touchMove, { passive: false });
+		this.scroller.addEventListener("touchend", this.touchEnd, { passive: false });
+		this.scroller.addEventListener("touchcancel", this.touchEnd, { passive: false });
 		// Obsidian mobile opens sidebars on horizontal swipes; writing or panning a page must not.
 		for (const type of ["touchstart", "touchmove", "touchend"] as const) {
 			this.registerDomEvent(this.scroller, type, (e: TouchEvent) => e.stopPropagation(), { passive: true });
@@ -258,21 +288,21 @@ export class PdfNotebookView extends FileView {
 				return;
 			}
 			this.doc = doc;
-			const first = await this.doc.getPage(1);
+			const base = await typicalPageSize(doc);
 			if (stale()) return;
-			const viewport = first.getViewport({ scale: 1 });
-			this.baseWidth = viewport.width;
-			this.baseHeight = viewport.height;
+			this.baseWidth = base.width;
+			this.baseHeight = base.height;
 			this.pageScale = this.fitScale();
 			// pdf.js transfers (detaches) `data` to its worker, so take the size from the file.
 			await this.loadSidecar(file, file.stat.size);
 			if (stale()) return;
 			this.buildSlots();
-			if (this.restoredSidebar) {
-				const tab = this.restoredSidebar;
-				this.restoredSidebar = null;
-				this.toggleSidebar(tab);
-			}
+			// Like GoodNotes: pages on the left on a wide screen, unless the user closed them.
+			const saved = this.restoredSidebar;
+			this.restoredSidebar = null;
+			this.sidebarClosedByUser = saved === "closed";
+			if (saved && saved !== "closed") this.toggleSidebar(saved);
+			else if (saved === null && this.contentEl.clientWidth >= 900) this.toggleSidebar("pages");
 			// Refit once the page list exists: a vertical scrollbar may have taken some width.
 			requestAnimationFrame(() => this.onResize());
 			this.observe();
@@ -671,8 +701,10 @@ export class PdfNotebookView extends FileView {
 			canvas.className = "goodnodes-pdf-canvas";
 			canvas.width = Math.max(1, Math.floor(viewport.width * pixelScale));
 			canvas.height = Math.max(1, Math.floor(viewport.height * pixelScale));
-			canvas.style.width = `${viewport.width}px`;
-			canvas.style.height = `${viewport.height}px`;
+			// Fill the page box: if zoom/fit changed while this page was rendering, it is
+			// briefly blurry instead of drawn at the wrong size (the "broken first page").
+			canvas.style.width = "100%";
+			canvas.style.height = "100%";
 			const ctx = canvas.getContext("2d", { alpha: false })!;
 			const task = page.render({
 				canvasContext: ctx,
@@ -724,8 +756,8 @@ export class PdfNotebookView extends FileView {
 		const scale = 1;
 		canvas.width = Math.max(1, Math.floor(base.width * scale));
 		canvas.height = Math.max(1, Math.floor(base.height * scale));
-		canvas.style.width = base.style.width;
-		canvas.style.height = base.style.height;
+		canvas.style.width = "100%";
+		canvas.style.height = "100%";
 		return canvas;
 	}
 
@@ -902,20 +934,8 @@ export class PdfNotebookView extends FileView {
 	private pointerDown(event: PointerEvent): void {
 		debug.pointer("pdf", event);
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
-		if (event.pointerType === "touch") {
-			if (this.penDown || Date.now() < this.penUntil) {
-				this.ignoredTouches.add(event.pointerId);
-				return;
-			}
-			const maxTouchSize = this.plugin.settings.palmMaxTouchSize;
-			if (maxTouchSize > 0 && Math.max(event.width, event.height) > maxTouchSize) {
-				this.ignoredTouches.add(event.pointerId);
-				return;
-			}
-			this.pointers.set(event.pointerId, event);
-			if (this.touchPointerCount() >= 2) this.startPinch();
-			return;
-		}
+		// Fingers scroll natively and pinch via TouchEvents (syncPinch); they never draw.
+		if (event.pointerType === "touch") return;
 		this.pointers.set(event.pointerId, event);
 		if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
 		if (event.pointerType === "pen") this.penDown = true;
@@ -933,12 +953,7 @@ export class PdfNotebookView extends FileView {
 
 	private pointerMove(event: PointerEvent): void {
 		debug.pointer("pdf", event);
-		if (event.pointerType === "touch" && this.pointers.has(event.pointerId)) {
-			this.pointers.set(event.pointerId, event);
-			if (this.touchPointerCount() >= 2 && Date.now() >= this.penUntil) this.updatePinch();
-			return;
-		}
-		if (event.pointerType === "touch" && this.ignoredTouches.has(event.pointerId)) return;
+		if (event.pointerType === "touch") return;
 		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
 		const events = event.getCoalescedEvents?.() ?? [event];
 		for (const item of events) {
@@ -953,9 +968,7 @@ export class PdfNotebookView extends FileView {
 		debug.pointer("pdf", event);
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
 		if (event.pointerType === "pen") this.penDown = false;
-		this.ignoredTouches.delete(event.pointerId);
 		this.pointers.delete(event.pointerId);
-		if (this.pinch && this.touchPointerCount() < 2) this.endPinch();
 		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
 		const { page, points, tool } = this.activeStroke;
 		this.activeStroke = null;
@@ -1135,25 +1148,39 @@ export class PdfNotebookView extends FileView {
 		ctx.fill();
 	}
 
-	private touchPointerCount(): number {
-		return [...this.pointers.values()].filter((pointer) => pointer.pointerType === "touch").length;
-	}
-
 	private blockStylusTouch(event: TouchEvent): void {
 		if ([...event.changedTouches].some((touch) => (touch as any).touchType === "stylus")) event.preventDefault();
 	}
 
-	private startPinch(): void {
-		const points = [...this.pointers.values()].filter((pointer) => pointer.pointerType === "touch").slice(-2);
-		if (points.length < 2) return;
-		const dx = points[1].clientX - points[0].clientX,
-			dy = points[1].clientY - points[0].clientY;
-		const centerX = (points[0].clientX + points[1].clientX) / 2,
-			centerY = (points[0].clientY + points[1].clientY) / 2;
+	/** Finger touches (not the pencil, not a resting palm) currently on the screen. */
+	private fingers(event: TouchEvent): Touch[] {
+		if (this.penDown || Date.now() < this.penUntil) return [];
+		const max = this.plugin.settings.palmMaxTouchSize;
+		return [...event.touches].filter((touch) => {
+			if ((touch as Touch & { touchType?: string }).touchType === "stylus") return false;
+			return !(max > 0 && Math.max(touch.radiusX, touch.radiusY) * 2 > max);
+		});
+	}
+
+	/** Two fingers pinch-zoom; one finger is left to native scrolling. */
+	private syncPinch(event: TouchEvent): void {
+		const fingers = this.fingers(event);
+		if (fingers.length >= 2) {
+			if (event.cancelable) event.preventDefault();
+			if (!this.pinch) this.startPinch(fingers[0], fingers[1]);
+			else this.updatePinch(fingers[0], fingers[1]);
+		} else if (this.pinch) {
+			this.endPinch();
+		}
+	}
+
+	private startPinch(a: Touch, b: Touch): void {
+		const centerX = (a.clientX + b.clientX) / 2,
+			centerY = (a.clientY + b.clientY) / 2;
 		const anchor = this.zoomAnchor(centerX, centerY);
 		const pagesRect = this.pagesEl.getBoundingClientRect();
 		this.pinch = {
-			distance: Math.hypot(dx, dy),
+			distance: Math.max(1, Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)),
 			zoom: this.zoom,
 			originX: centerX,
 			originY: centerY,
@@ -1165,18 +1192,16 @@ export class PdfNotebookView extends FileView {
 		this.pagesEl.style.transformOrigin = `${centerX - pagesRect.left}px ${centerY - pagesRect.top}px`;
 	}
 
-	private updatePinch(): void {
-		if (!this.pinch) this.startPinch();
+	private updatePinch(a: Touch, b: Touch): void {
 		if (!this.pinch) return;
-		const points = [...this.pointers.values()].filter((pointer) => pointer.pointerType === "touch").slice(-2);
-		if (points.length < 2) return;
-		const dx = points[1].clientX - points[0].clientX,
-			dy = points[1].clientY - points[0].clientY;
-		this.pinch.centerX = (points[0].clientX + points[1].clientX) / 2;
-		this.pinch.centerY = (points[0].clientY + points[1].clientY) / 2;
+		this.pinch.centerX = (a.clientX + b.clientX) / 2;
+		this.pinch.centerY = (a.clientY + b.clientY) / 2;
 		this.pinch.visualScale = Math.max(
 			0.5 / this.pinch.zoom,
-			Math.min(4 / this.pinch.zoom, Math.hypot(dx, dy) / this.pinch.distance),
+			Math.min(
+				4 / this.pinch.zoom,
+				Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) / this.pinch.distance,
+			),
 		);
 		this.pagesEl.style.transform = `translate(${this.pinch.centerX - this.pinch.originX}px, ${this.pinch.centerY - this.pinch.originY}px) scale(${this.pinch.visualScale})`;
 	}
@@ -1308,9 +1333,11 @@ export class PdfNotebookView extends FileView {
 
 	private toggleSidebar(tab: SidebarTab = this.sidebar ? this.sidebarTab : "pages"): void {
 		if (this.sidebar && tab === this.sidebarTab) {
+			this.sidebarClosedByUser = true;
 			this.closeSidebar();
 			return;
 		}
+		this.sidebarClosedByUser = false;
 		this.sidebarTab = tab;
 		if (!this.sidebar) {
 			this.contentEl.addClass("has-sidebar");
@@ -1319,7 +1346,10 @@ export class PdfNotebookView extends FileView {
 			const header = panel.createDiv({ cls: "goodnodes-pdf-sidebar-header" });
 			this.sidebarContent = panel.createDiv({ cls: "goodnodes-pdf-sidebar-content" });
 			header.createDiv({ cls: "goodnodes-pdf-sidebar-title" });
-			this.iconButton(header, "x", "Close sidebar", () => this.closeSidebar());
+			this.iconButton(header, "x", "Close sidebar", () => {
+				this.sidebarClosedByUser = true;
+				this.closeSidebar();
+			});
 			const tabs = panel.createDiv({ cls: "goodnodes-pdf-sidebar-tabs" });
 			for (const [name, icon] of [
 				["pages", "file"],
@@ -1592,7 +1622,11 @@ export class PdfNotebookView extends FileView {
 			type: "goodnodes-pdf",
 			version: 1,
 			pdf: { size: file?.stat.size ?? 0, pages: this.slots.length },
-			view: { page: this.currentPage, zoom: this.zoom, sidebar: this.sidebar ? this.sidebarTab : null },
+			view: {
+				page: this.currentPage,
+				zoom: this.zoom,
+				sidebar: this.sidebar ? this.sidebarTab : this.sidebarClosedByUser ? "closed" : null,
+			},
 			bookmarks: [...this.bookmarks].sort((a, b) => a - b),
 			pages,
 			...(this.notebookMeta ? { notebook: this.notebookMeta } : {}),
@@ -1668,7 +1702,7 @@ export class PdfNotebookView extends FileView {
 			}
 			for (const [index] of this.strokes) this.drawCommittedInk(index);
 			this.restorePage(this.currentPage);
-			if (this.restoredSidebar) {
+			if (this.restoredSidebar && this.restoredSidebar !== "closed") {
 				const tab = this.restoredSidebar;
 				this.restoredSidebar = null;
 				if (!this.sidebar) this.toggleSidebar(tab);
@@ -1816,10 +1850,9 @@ export class PdfNotebookView extends FileView {
 		const data = bytes.slice(0);
 		const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
 		this.doc = doc;
-		const first = await doc.getPage(1);
-		const viewport = first.getViewport({ scale: 1 });
-		this.baseWidth = viewport.width;
-		this.baseHeight = viewport.height;
+		const base = await typicalPageSize(doc);
+		this.baseWidth = base.width;
+		this.baseHeight = base.height;
 		this.pageScale = this.fitScale();
 		this.buildSlots();
 		this.observe();

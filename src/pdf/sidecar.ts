@@ -30,7 +30,10 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 				page: clamp(Math.floor(raw.view.page ?? 0), 0, Math.max(0, pageCount - 1)),
 				zoom: clamp(raw.view.zoom ?? 1, 0.5, 4),
 				sidebar:
-					raw.view.sidebar === "pages" || raw.view.sidebar === "outline" || raw.view.sidebar === "bookmarks"
+					raw.view.sidebar === "pages" ||
+					raw.view.sidebar === "outline" ||
+					raw.view.sidebar === "bookmarks" ||
+					raw.view.sidebar === "closed"
 						? raw.view.sidebar
 						: null,
 			},

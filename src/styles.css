@@ -68,3 +68,28 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
 }
+
+/* ---------- Obsidian mobile ---------- */
+/* Obsidian mobile pads every button 20px left/right; in our 40px icon buttons that
+   squeezed the icons to 0 width (the empty toolbar on the iPad). */
+.goodnodes-pdf-root button,
+.goodnodes-pdf-popover button,
+.goodnodes-pen-popover button,
+.goodnodes-canvas-host .goodnodes-bg-button,
+.goodnodes-bg-menu button,
+.goodnodes-notebook-modal button.goodnodes-notebook-swatch,
+.goodnodes-notebook-modal button.goodnodes-notebook-template {
+	padding-left: 0;
+	padding-right: 0;
+}
+.goodnodes-pdf-root button svg,
+.goodnodes-pdf-popover button svg,
+.goodnodes-pen-popover button svg,
+.goodnodes-canvas-host .goodnodes-bg-button svg,
+.goodnodes-bg-menu button svg {
+	flex: none;
+}
+.goodnodes-bg-menu button {
+	padding-left: 8px;
+	padding-right: 8px;
+}

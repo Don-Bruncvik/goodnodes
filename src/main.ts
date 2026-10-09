@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
+import { FuzzySuggestModal, Notice, Plugin, TFile, TFolder, normalizePath, setIcon } from "obsidian";
 import { debug, DebugPanel } from "./debug";
 import { CANVAS_EXTENSION, CANVAS_VIEW_TYPE, CanvasView, emptyCanvasFile } from "./canvas/CanvasView";
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
@@ -24,6 +24,10 @@ export default class GoodNodesPlugin extends Plugin {
 		if (this.settings.openPdfByDefault) this.takeOverPdf();
 
 		this.updateDebugRibbon();
+
+		this.app.workspace.onLayoutReady(() => this.decorateEmptyTabs());
+		this.registerEvent(this.app.workspace.on("layout-change", () => this.decorateEmptyTabs()));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.decorateEmptyTabs()));
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
@@ -77,7 +81,29 @@ export default class GoodNodesPlugin extends Plugin {
 		);
 	}
 
+	/** Add GoodNodes actions to Obsidian's "New tab" screen (next to New note / New canvas). */
+	private decorateEmptyTabs(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType("empty")) {
+			const list = leaf.view.containerEl.querySelector<HTMLElement>(".empty-state-action-list");
+			if (!list || list.querySelector(".goodnodes-empty-action")) continue;
+			const add = (label: string, icon: string, action: () => void) => {
+				const el = list.createDiv({
+					cls: "text-icon-button tappable mod-pill empty-state-action goodnodes-empty-action",
+					attr: { role: "button", tabindex: "0", "aria-label": label },
+				});
+				setIcon(el.createSpan({ cls: "text-button-icon" }), icon);
+				el.createSpan({ cls: "text-button-label", text: label });
+				el.addEventListener("click", action);
+			};
+			add("New GoodNodes notebook", "notebook", () => void this.newNotebook());
+			add("New GoodNodes whiteboard", "presentation", () => void this.newWhiteboard());
+			add("Import into GoodNodes", "download", () => void this.importDocuments());
+			add("Open PDF in GoodNodes", "book-open", () => new PdfPicker(this).open());
+		}
+	}
+
 	onunload(): void {
+		document.querySelectorAll(".goodnodes-empty-action").forEach((el) => el.remove());
 		this.debugPanel.close();
 		window.removeEventListener("error", this.onWindowError);
 		window.removeEventListener("unhandledrejection", this.onUnhandledRejection);
@@ -222,4 +248,23 @@ interface ViewRegistry {
 	typeByExtension?: Record<string, string>;
 	registerExtensions?(extensions: string[], viewType: string): void;
 	unregisterExtensions?(extensions: string[]): void;
+}
+
+class PdfPicker extends FuzzySuggestModal<TFile> {
+	constructor(private plugin: GoodNodesPlugin) {
+		super(plugin.app);
+		this.setPlaceholder("Open a PDF as GoodNodes notebook");
+	}
+	getItems(): TFile[] {
+		return this.app.vault
+			.getFiles()
+			.filter((f) => f.extension === "pdf")
+			.sort((a, b) => b.stat.mtime - a.stat.mtime);
+	}
+	getItemText(file: TFile): string {
+		return file.path;
+	}
+	onChooseItem(file: TFile): void {
+		void this.plugin.openPdf(file);
+	}
 }
