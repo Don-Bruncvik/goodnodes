@@ -69,6 +69,8 @@ type PageSlot = {
 	task?: any;
 	page?: PdfPage;
 	busy?: boolean;
+	/** Drawn at an old zoom: stays on screen (scaled) until the sharp render replaces it. */
+	stale?: boolean;
 };
 type Tool = InkTool | "eraser";
 type ZoomAnchor = { page: number; x: number; y: number };
@@ -593,6 +595,11 @@ export class PdfNotebookView extends FileView {
 		return this.plugin.settings.pdfPageDirection === "horizontal";
 	}
 
+	/** Like a book, zooming out stops at the whole page; vertical scrolling may show several. */
+	private get minZoom(): number {
+		return this.horizontal ? 1 : 0.5;
+	}
+
 	private mainScroll(): number {
 		return this.horizontal ? this.scroller.scrollLeft : this.scroller.scrollTop;
 	}
@@ -744,7 +751,8 @@ export class PdfNotebookView extends FileView {
 		const selected = new Set<number>();
 		for (let i = Math.max(0, current - 2); i <= Math.min(this.slots.length - 1, current + 2); i++) selected.add(i);
 		this.visible = selected;
-		for (const i of selected) if (!this.slots[i].canvas && !this.slots[i].busy) this.queue.push(i);
+		for (const i of selected)
+			if ((!this.slots[i].canvas || this.slots[i].stale) && !this.slots[i].busy) this.queue.push(i);
 		this.queue = [...new Set(this.queue)].sort((a, b) => Math.abs(a - current) - Math.abs(b - current));
 		for (let i = 0; i < this.slots.length; i++) {
 			if (Math.abs(i - current) > 4) this.release(i);
@@ -757,7 +765,8 @@ export class PdfNotebookView extends FileView {
 	private pump(): void {
 		while (this.running < 2 && this.queue.length) {
 			const index = this.queue.shift()!;
-			if (!this.visible.has(index) || this.slots[index].canvas || this.slots[index].busy) continue;
+			const slot = this.slots[index];
+			if (!this.visible.has(index) || (slot.canvas && !slot.stale) || slot.busy) continue;
 			this.running++;
 			this.slots[index].busy = true;
 			void this.renderPage(index).finally(() => {
@@ -808,7 +817,9 @@ export class PdfNotebookView extends FileView {
 				viewport: pixelScale === 1 ? viewport : page.getViewport({ scale: scale * pixelScale }),
 			});
 			this.slots[index].task = task;
-			this.slots[index].el.appendChild(canvas);
+			// A stale page keeps showing its old canvas; the new one goes in only when finished.
+			const replacing = !!this.slots[index].canvas;
+			if (!replacing) this.slots[index].el.appendChild(canvas);
 			await task.promise;
 			if (this.disposed || !this.visible.has(index)) {
 				canvas.width = canvas.height = 0;
@@ -818,6 +829,18 @@ export class PdfNotebookView extends FileView {
 			const ink = this.makeOverlay(canvas, "goodnodes-pdf-ink");
 			const live = this.makeOverlay(canvas, "goodnodes-pdf-live");
 			live.width = live.height = 0;
+			if (replacing) {
+				const old = this.slots[index];
+				for (const key of ["canvas", "ink", "live"] as const) {
+					const previous = old[key];
+					if (previous) {
+						previous.width = previous.height = 0;
+						previous.remove();
+					}
+				}
+				this.slots[index].el.appendChild(canvas);
+			}
+			this.slots[index].stale = false;
 			this.slots[index].el.append(ink, live);
 			this.slots[index].canvas = canvas;
 			this.slots[index].ink = ink;
@@ -871,6 +894,7 @@ export class PdfNotebookView extends FileView {
 				slot[key] = undefined;
 			}
 		}
+		slot.stale = false;
 		(slot.page ?? this.loaded.get(index))?.cleanup?.();
 		this.loaded.delete(index);
 		slot.page = undefined;
@@ -901,7 +925,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private setZoom(value: number, clientX?: number, clientY?: number): void {
-		const next = Math.max(0.5, Math.min(4, value));
+		const next = Math.max(this.minZoom, Math.min(4, value));
 		if (Math.abs(next - this.zoom) < 0.001) return;
 		this.relayout(() => (this.zoom = next), clientX, clientY);
 		this.markDirty();
@@ -1000,7 +1024,7 @@ export class PdfNotebookView extends FileView {
 		const anchor = this.zoomAnchor(screenX, screenY);
 		change();
 		this.updateSnapping();
-		this.releaseAll();
+		this.markRenderedStale();
 		for (const slot of this.slots) {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
@@ -1035,6 +1059,22 @@ export class PdfNotebookView extends FileView {
 
 	private releaseAll(): void {
 		for (const index of this.slots.keys()) this.release(index);
+	}
+
+	/**
+	 * After a zoom or resize, keep the pages near the current one on screen (the browser
+	 * scales them) and re-render them sharp in the background. Releasing them showed
+	 * blank white pages for a moment: the flicker after every pinch.
+	 */
+	private markRenderedStale(): void {
+		for (const [index, slot] of this.slots.entries()) {
+			if (!slot.canvas) continue;
+			if (Math.abs(index - this.currentPage) > 2) this.release(index);
+			else {
+				slot.task?.cancel?.();
+				slot.stale = true;
+			}
+		}
 	}
 
 	private updateAddPageTile(): void {
@@ -1311,7 +1351,7 @@ export class PdfNotebookView extends FileView {
 		this.pinch.centerX = (a.clientX + b.clientX) / 2;
 		this.pinch.centerY = (a.clientY + b.clientY) / 2;
 		this.pinch.visualScale = Math.max(
-			0.5 / this.pinch.zoom,
+			this.minZoom / this.pinch.zoom,
 			Math.min(
 				4 / this.pinch.zoom,
 				Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) / this.pinch.distance,
@@ -1325,9 +1365,9 @@ export class PdfNotebookView extends FileView {
 		const gesture = this.pinch;
 		this.pagesEl.style.transform = "";
 		this.pagesEl.style.transformOrigin = "";
-		this.zoom = Math.max(0.5, Math.min(4, gesture.zoom * gesture.visualScale));
+		this.zoom = Math.max(this.minZoom, Math.min(4, gesture.zoom * gesture.visualScale));
 		this.markDirty();
-		this.releaseAll();
+		this.markRenderedStale();
 		for (const slot of this.slots) {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
@@ -1416,7 +1456,7 @@ export class PdfNotebookView extends FileView {
 			this.observe();
 			this.pageScale = this.fitScale();
 			// Canvases were drawn at the old scale; they re-render at the new one.
-			this.releaseAll();
+			this.markRenderedStale();
 			for (const slot of this.slots) {
 				slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 				slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
@@ -1490,7 +1530,7 @@ export class PdfNotebookView extends FileView {
 			const ref = destination[0];
 			const index = typeof ref === "number" ? ref : await this.doc.getPageIndex(ref);
 			this.jumpTo(index);
-			if (this.contentEl.clientWidth < 900) this.closeSidebar();
+			if (this.contentEl.clientWidth < 600) this.closeSidebar();
 		} catch (err) {
 			debug.error("PDF outline jump failed", err);
 		}
@@ -1602,7 +1642,7 @@ export class PdfNotebookView extends FileView {
 			item.createDiv({ cls: "goodnodes-pdf-thumbnail-label", text: String(page + 1) });
 			item.onclick = () => {
 				this.jumpTo(page);
-				if (this.contentEl.clientWidth < 900) this.closeSidebar();
+				if (this.contentEl.clientWidth < 600) this.closeSidebar();
 			};
 			this.thumbObserver.observe(item);
 		}
@@ -1766,7 +1806,8 @@ export class PdfNotebookView extends FileView {
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
 			this.bookmarks = new Set(parsed.bookmarks);
 			this.currentPage = parsed.view.page;
-			this.zoom = parsed.view.zoom;
+			// Book mode always opens on the whole page, as tall as the screen allows.
+			this.zoom = this.horizontal ? 1 : parsed.view.zoom;
 			this.restoredSidebar = parsed.view.sidebar ?? null;
 			this.notebookMeta = parsed.notebook;
 			this.lastSerialized = text;
@@ -1855,7 +1896,7 @@ export class PdfNotebookView extends FileView {
 			this.strokes = new Map(Object.entries(parsed.pages).map(([index, strokes]) => [Number(index), strokes]));
 			this.bookmarks = new Set(parsed.bookmarks);
 			this.currentPage = parsed.view.page;
-			this.zoom = parsed.view.zoom;
+			this.zoom = Math.max(this.minZoom, parsed.view.zoom);
 			this.restoredSidebar = parsed.view.sidebar ?? null;
 			this.notebookMeta = parsed.notebook;
 			this.lastSerialized = text;

@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.2)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.3)
 
 ## Výsledky spike M0
 
@@ -39,6 +39,11 @@
 - Späť a vpred sú v hlavnom paneli nástrojov, už neprekrývajú stranu. Pri vodorovnom listovaní je vidno len aktuálnu stranu.
 - Okno nového zošita: A4/Letter a Portrait/Landscape sú segmentový prepínač ako v iOS (predtým sa prekrývali), farby obálky sú kruhy.
 - Obrazovka „New tab“ na iPade: tlačidlá sú opäť vycentrované. Obsidian obmedzoval ich kontajner na 280 px.
+
+**0.4.3:**
+- Pri listovaní ako v knihe je najmenší zoom celá strana a PDF sa vždy otvorí na celú výšku. Strany sa už nezoradia vedľa seba.
+- Zoom (pinch aj menu) nepreblikáva: strana ostane viditeľná, kým sa ostrá verzia nevykreslí na pozadí.
+- Bočný panel odsúva strany aj na iPade na výšku (užší, jeden stĺpec miniatúr). Panel nástrojov a číslo strany sa vycentrujú vo zvyšnom priestore. Ako prekrytie ostáva len na úzkych obrazovkách (pod 600 px).
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 

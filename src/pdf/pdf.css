@@ -23,12 +23,6 @@
 .goodnodes-pdf-sidebar-content::-webkit-scrollbar {
 	display: none;
 }
-/* Wide view: the pages sidebar pushes the pages aside (they refit) instead of covering them. */
-@container (min-width: 900px) {
-	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-scroll {
-		left: 320px;
-	}
-}
 .goodnodes-pdf-pages {
 	display: flex;
 	flex-direction: column;
@@ -311,7 +305,7 @@
 	left: 0;
 	display: flex;
 	flex-direction: column;
-	width: 320px;
+	width: var(--goodnodes-sidebar-width);
 	max-width: 85vw;
 	padding: 8px;
 	box-sizing: border-box;
@@ -443,11 +437,6 @@
 	line-height: 1.5;
 }
 
-@container (min-width: 900px) {
-	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-scroll {
-		left: 320px;
-	}
-}
 @container (max-width: 760px) {
 	.goodnodes-pdf-toolbar {
 		gap: 0;
@@ -496,8 +485,34 @@
 .goodnodes-pdf-popover-eraser .goodnodes-pdf-width-sample {
 	background: transparent;
 }
-/* Narrow views: the sidebar is an overlay above the toolbar and undo/redo, like a sheet. */
+/* The pages sidebar pushes the pages aside (they refit) and the toolbar and page
+   indicator re-center over what is left, so nothing covers the page. iPad portrait
+   gets a slimmer one-column sidebar; only phones keep it as an overlay sheet. */
+.goodnodes-pdf-root {
+	--goodnodes-sidebar-width: 320px;
+}
 @container (max-width: 899px) {
+	/* On the children: a container query can't restyle the container (root) itself. */
+	.goodnodes-pdf-root > * {
+		--goodnodes-sidebar-width: 220px;
+	}
+	.goodnodes-pdf-sidebar-content:has(.goodnodes-pdf-thumbnail) {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+@container (min-width: 600px) {
+	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-scroll {
+		left: var(--goodnodes-sidebar-width);
+	}
+	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-toolbar,
+	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-indicator {
+		left: calc(var(--goodnodes-sidebar-width) + (100% - var(--goodnodes-sidebar-width)) / 2);
+	}
+	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-toolbar {
+		max-width: calc(100% - var(--goodnodes-sidebar-width) - 16px);
+	}
+}
+@container (max-width: 599px) {
 	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-sidebar {
 		z-index: 14;
 	}
