@@ -1,4 +1,4 @@
-import { FuzzySuggestModal, Notice, Plugin, TFile, TFolder, normalizePath, setIcon } from "obsidian";
+import { FuzzySuggestModal, Notice, Platform, Plugin, TFile, TFolder, normalizePath, setIcon } from "obsidian";
 import { debug, DebugPanel } from "./debug";
 import { CANVAS_EXTENSION, CANVAS_VIEW_TYPE, CanvasView, emptyCanvasFile } from "./canvas/CanvasView";
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
@@ -34,7 +34,9 @@ export default class GoodNodesPlugin extends Plugin {
 		this.settings.penWidths = widths(saved.penWidths, saved.penWidth, [1, 2, 4]);
 		this.settings.highlighterWidths = widths(saved.highlighterWidths, saved.highlighterWidth, [1.6, 2.4, 3.6]);
 		this.addSettingTab(new GoodNodesSettingTab(this.app, this));
-		debug.log(`GoodNodes ${this.manifest.version} loaded, UA: ${navigator.userAgent}`);
+		debug.log(
+			`GoodNodes ${this.manifest.version} loaded, platform: ${Platform.isIosApp ? "iOS" : Platform.isMacOS ? "macOS" : "desktop"}`,
+		);
 		window.addEventListener("error", this.onWindowError);
 		window.addEventListener("unhandledrejection", this.onUnhandledRejection);
 

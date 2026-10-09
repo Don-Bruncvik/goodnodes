@@ -5,12 +5,11 @@ import { App, TFolder, normalizePath } from "obsidian";
  * files, or [] when cancelled. `capture` asks iOS to open the camera directly.
  */
 export function pickFiles(accept: string, options: { multiple?: boolean; capture?: boolean } = {}): Promise<File[]> {
-	const input = document.createElement("input");
+	const input = createEl("input", { cls: "goodnodes-file-picker" });
 	input.type = "file";
 	input.accept = accept;
 	input.multiple = options.multiple ?? true;
 	if (options.capture) input.setAttribute("capture", "environment");
-	input.style.display = "none";
 	document.body.appendChild(input);
 	return new Promise<File[]>((resolve) => {
 		let settled = false;

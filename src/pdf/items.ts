@@ -1,4 +1,4 @@
-import type { App, TFile } from "obsidian";
+import type { App, TAbstractFile, TFile } from "obsidian";
 import { getStroke } from "perfect-freehand";
 import { strokeOptions } from "../ink/penStyle";
 import type { InkStroke } from "./model";
@@ -43,6 +43,10 @@ export function layoutText(text: string, boxWidthPx: number, measure: (text: str
 	return lines.length ? lines : [""];
 }
 
+function isVaultFile(file: TAbstractFile | null): file is TFile {
+	return file !== null && "extension" in file && "basename" in file && "stat" in file;
+}
+
 export class ImageCache implements ImageCacheLike {
 	private images = new Map<string, HTMLImageElement | null>();
 	constructor(
@@ -53,14 +57,14 @@ export class ImageCache implements ImageCacheLike {
 		if (this.images.has(src)) return this.images.get(src) ?? null;
 		this.images.set(src, null);
 		const file = this.app.vault.getAbstractFileByPath(src);
-		if (!file) return null;
+		if (!isVaultFile(file)) return null;
 		const image = new Image();
 		image.onload = () => {
 			this.images.set(src, image);
 			this.onLoad(src);
 		};
 		image.onerror = () => this.onLoad(src);
-		image.src = this.app.vault.getResourcePath(file as TFile);
+		image.src = this.app.vault.getResourcePath(file);
 		return null;
 	}
 }

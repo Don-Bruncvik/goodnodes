@@ -1,5 +1,5 @@
 import type { InkStroke, PdfSidecar } from "./model";
-import type { NotebookMeta, Orientation, PaperSize, PaperTemplate } from "../notebook";
+import type { NotebookMeta } from "../notebook";
 
 export function parseSidecar(text: string, pageCount: number): PdfSidecar | null {
 	try {
@@ -62,16 +62,20 @@ function parseNotebook(value: unknown): NotebookMeta | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const raw = value as Partial<NotebookMeta>;
 	if (
-		!(["blank", "ruled", "ruled-narrow", "grid", "dots"] as PaperTemplate[]).includes(raw.template as PaperTemplate)
+		raw.template !== "blank" &&
+		raw.template !== "ruled" &&
+		raw.template !== "ruled-narrow" &&
+		raw.template !== "grid" &&
+		raw.template !== "dots"
 	)
 		return undefined;
 	if (!("a4" === raw.size || "letter" === raw.size)) return undefined;
 	if (!("portrait" === raw.orientation || "landscape" === raw.orientation)) return undefined;
 	if (raw.cover !== null && (typeof raw.cover !== "string" || !/^#[\da-f]{6}$/i.test(raw.cover))) return undefined;
 	return {
-		template: raw.template as PaperTemplate,
-		size: raw.size as PaperSize,
-		orientation: raw.orientation as Orientation,
+		template: raw.template,
+		size: raw.size,
+		orientation: raw.orientation,
 		cover: raw.cover,
 	};
 }

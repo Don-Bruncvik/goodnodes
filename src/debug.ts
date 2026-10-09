@@ -27,7 +27,7 @@ class DebugLog {
 
 	error(msg: string, err?: unknown): void {
 		const detail =
-			err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : err !== undefined ? String(err) : "";
+			err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : err === undefined ? "" : formatUnknown(err);
 		this.log(detail ? `${msg}: ${detail}` : msg, "error");
 	}
 
@@ -67,6 +67,15 @@ class DebugLog {
 }
 
 export const debug = new DebugLog();
+
+function formatUnknown(value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value) ?? "";
+	} catch {
+		return "Unknown error";
+	}
+}
 
 /** Floating, draggable-free panel at the bottom of the screen. */
 export class DebugPanel {
@@ -111,7 +120,7 @@ export class DebugPanel {
 
 	private schedule(): void {
 		if (this.raf) return;
-		this.raf = requestAnimationFrame(() => {
+		this.raf = window.requestAnimationFrame(() => {
 			this.raf = 0;
 			this.render();
 		});

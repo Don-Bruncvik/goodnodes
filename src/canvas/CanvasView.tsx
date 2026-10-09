@@ -1,11 +1,11 @@
-import { Menu, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
+import { Menu, Platform, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
 import { StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
 	CaptureUpdateAction,
 	Excalidraw,
 	MainMenu,
-	getSceneVersion,
+	hashElementsVersion,
 	restore,
 	serializeAsJSON,
 } from "@excalidraw/excalidraw";
@@ -75,15 +75,39 @@ export function emptyCanvasFile(): string {
 }
 
 function parseCanvasFile(data: string): CanvasFile {
-	if (!data.trim()) return JSON.parse(emptyCanvasFile());
-	const parsed = JSON.parse(data) as Partial<CanvasFile>;
+	if (!data.trim()) return parseCanvasFile(emptyCanvasFile());
+	const value: unknown = JSON.parse(data);
+	const parsed = isRecord(value) ? value : {};
+	const background = isRecord(parsed.background) ? parsed.background : {};
+	const viewport = isRecord(parsed.viewport) ? parsed.viewport : {};
+	const scene = isRecord(parsed.scene) ? parsed.scene : {};
 	return {
 		type: "goodnodes",
 		version: 1,
-		background: { ...DEFAULT_BACKGROUND, ...parsed.background },
-		viewport: { scrollX: 0, scrollY: 0, zoom: 1, ...parsed.viewport },
-		scene: parsed.scene ?? {},
+		background: { ...DEFAULT_BACKGROUND, ...background },
+		viewport: { scrollX: 0, scrollY: 0, zoom: 1, ...viewport },
+		scene,
 	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSerializedBinaryFiles(
+	value: unknown,
+): value is Record<string, { id: string; mimeType: string; created: number; dataURL: string }> {
+	return (
+		isRecord(value) &&
+		Object.values(value).every(
+			(file) =>
+				isRecord(file) &&
+				typeof file.id === "string" &&
+				typeof file.mimeType === "string" &&
+				typeof file.created === "number" &&
+				typeof file.dataURL === "string",
+		)
+	);
 }
 
 /** Restore a scene from disk; vault-backed images are loaded separately. */
@@ -185,8 +209,12 @@ export class CanvasView extends TextFileView {
 	getViewData(): string {
 		if (!this.api) return this.lastData;
 		const elements = this.api.getSceneElementsIncludingDeleted();
-		const scene = JSON.parse(serializeAsJSON(elements, this.api.getAppState(), this.api.getFiles(), "local"));
-		scene.files = this.images.toStored(scene.files);
+		const serialized: unknown = JSON.parse(
+			serializeAsJSON(elements, this.api.getAppState(), this.api.getFiles(), "local"),
+		);
+		if (!isRecord(serialized)) throw new Error("Invalid Excalidraw scene JSON");
+		const scene = serialized;
+		scene.files = this.images.toStored(isSerializedBinaryFiles(scene.files) ? scene.files : {});
 		const file: CanvasFile = {
 			type: "goodnodes",
 			version: 1,
@@ -320,17 +348,26 @@ export class CanvasView extends TextFileView {
 			},
 			setting: (key, value) => {
 				const s = this.plugin.settings;
-				if (key === "penType") s.penType = value as any;
+				if (key === "penType" && (value === "fountain" || value === "ball" || value === "brush"))
+					s.penType = value;
 				if (key === "drawAndHold") s.drawAndHold = Boolean(value);
-				if (key === "eraserMode") s.eraserMode = value as any;
+				if (key === "eraserMode" && (value === "precise" || value === "stroke")) s.eraserMode = value;
 				if (key === "eraserHighlighterOnly") s.eraserHighlighterOnly = Boolean(value);
 				if (key === "eraserSize") s.eraserSize = Number(value);
 				if (key === "textSize") s.canvasTextSize = Number(value);
 				if (key === "textFont") s.canvasTextFont = Number(value);
-				if (key === "textAlign") s.canvasTextAlign = value as any;
-				if (key === "shape") {
-					this.selectedShape = value as ToolbarShape;
-					this.api?.setActiveTool({ type: value as any });
+				if (key === "textAlign" && (value === "left" || value === "center" || value === "right"))
+					s.canvasTextAlign = value;
+				if (
+					key === "shape" &&
+					(value === "line" ||
+						value === "arrow" ||
+						value === "rectangle" ||
+						value === "ellipse" ||
+						value === "diamond")
+				) {
+					this.selectedShape = value;
+					this.api?.setActiveTool({ type: value });
 				}
 				if (this.toolbarTool === "text") this.applyText();
 				this.saveToolbarSettings();
@@ -396,7 +433,7 @@ export class CanvasView extends TextFileView {
 		void this.images
 			.load(file.scene.files)
 			.then((files) => files.length && this.api === api && api.addFiles(files));
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			this.savedVersion = this.currentVersion();
 			this.loading = false;
 			debug.log("canvas reloaded from disk");
@@ -443,7 +480,7 @@ export class CanvasView extends TextFileView {
 			api.onPointerUp((activeTool) => {
 				if (activeTool.type !== "freedraw") return;
 				// Let Excalidraw finalize the element and record its history entry first.
-				setTimeout(() => {
+				window.setTimeout(() => {
 					if (this.api !== api) return;
 					this.finishCanvasStroke(api);
 					const s = this.plugin.settings;
@@ -464,7 +501,7 @@ export class CanvasView extends TextFileView {
 			if (files.length && this.api === api) api.addFiles(files);
 		});
 		// The initial scene is not an unsaved change.
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			if (api.getAppState().activeTool.type === "selection") api.setActiveTool({ type: "freedraw" });
 			this.fileCount = Object.keys(api.getFiles()).length;
 			this.savedVersion = this.currentVersion();
@@ -497,7 +534,7 @@ export class CanvasView extends TextFileView {
 			this.api?.setActiveTool({ type: "text" });
 			this.applyText();
 		} else if (tool === "image") this.api?.setActiveTool({ type: "image" });
-		else this.api?.setActiveTool({ type: this.selectedShape as any });
+		else this.api?.setActiveTool({ type: this.selectedShape });
 		this.goodnodesToolbar?.refresh();
 	}
 
@@ -514,7 +551,7 @@ export class CanvasView extends TextFileView {
 	}
 
 	private canvasHistory(action: "undo" | "redo"): void {
-		const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+		const mac = Platform.isMacOS || Platform.isIosApp;
 		this.hostEl?.querySelector(".excalidraw")?.dispatchEvent(
 			new KeyboardEvent("keydown", {
 				key: "z",
@@ -554,7 +591,7 @@ export class CanvasView extends TextFileView {
 			item
 				.setTitle("Library")
 				.setIcon("library")
-				.onClick(() => (this.api as any)?.toggleSidebar?.({ name: "default" })),
+				.onClick(() => this.api?.toggleSidebar({ name: "default" })),
 		);
 		menu.addItem((item) =>
 			item
@@ -650,10 +687,9 @@ export class CanvasView extends TextFileView {
 				(event.pointerType !== "touch" || this.fingersDraw())
 			) {
 				const point = this.scenePoint(event.clientX, event.clientY);
-				const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+				const overlay = createSvg("svg");
 				overlay.classList.add("goodnodes-lasso-overlay", "is-hold-preview");
-				const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-				overlay.append(path);
+				const path = overlay.createSvg("path");
 				this.hostEl?.append(overlay);
 				const hold = (this.holdDrag = {
 					id: event.pointerId,
@@ -687,10 +723,9 @@ export class CanvasView extends TextFileView {
 			return;
 		event.preventDefault();
 		event.stopPropagation();
-		const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		const overlay = createSvg("svg");
 		overlay.classList.add("goodnodes-lasso-overlay");
-		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-		overlay.append(path);
+		const path = overlay.createSvg("path");
 		this.hostEl?.append(overlay);
 		this.lassoDrag = { id: event.pointerId, points: [[point.x, point.y]], overlay, path };
 	};
@@ -744,7 +779,6 @@ export class CanvasView extends TextFileView {
 		this.api?.updateScene({
 			appState: {
 				selectedElementIds,
-				activeTool: { type: "selection", customType: null, locked: false, lastActiveTool: null } as any,
 			},
 			captureUpdate: CaptureUpdateAction.NEVER,
 		});
@@ -812,7 +846,7 @@ export class CanvasView extends TextFileView {
 				customData: { ...(element.customData ?? {}), goodnodesTool: "highlighter" },
 				simulatePressure: false,
 				pressures: element.points.map(() => 0.5),
-			} as ExcalidrawElement;
+			};
 		else if (this.toolbarTool === "pen" && s.penType === "ball")
 			updated = { ...element, simulatePressure: false, pressures: element.points.map(() => 0.5) };
 		else if (this.toolbarTool === "pen" && s.penType === "brush")
@@ -843,7 +877,7 @@ export class CanvasView extends TextFileView {
 		)
 			return;
 		const target = event.target as HTMLElement;
-		if (!(target instanceof HTMLCanvasElement) || !target.closest(".excalidraw")) return;
+		if (!target.instanceOf(HTMLCanvasElement) || !target.closest(".excalidraw")) return;
 		const point = this.scenePoint(event.clientX, event.clientY);
 		this.textDrag = { id: event.pointerId, start: point, current: point };
 	};
@@ -876,7 +910,7 @@ export class CanvasView extends TextFileView {
 		const fontSize = Math.min(400, Math.max(8, Math.round(box.height / 1.25)));
 		const api = this.api;
 		// Let Excalidraw finish its own pointerup first.
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			const editing = api?.getAppState().editingTextElement;
 			if (!api || this.api !== api || !editing) return;
 			const elements = api.getSceneElementsIncludingDeleted().map((element) =>
@@ -973,7 +1007,7 @@ export class CanvasView extends TextFileView {
 	private currentVersion(
 		elements: readonly ExcalidrawElement[] = this.api?.getSceneElementsIncludingDeleted() ?? [],
 	): string {
-		return `${getSceneVersion(elements)}|${this.background.kind}|${this.background.size}|${this.background.color}`;
+		return `${hashElementsVersion(elements)}|${this.background.kind}|${this.background.size}|${this.background.color}`;
 	}
 
 	private applyViewport(v: Viewport): void {

@@ -22,7 +22,7 @@ export function debrandExcalidraw(host: HTMLElement, openHelp: () => void): () =
 		if (hint && hint.textContent !== LIBRARY_HINT) hint.textContent = LIBRARY_HINT;
 	};
 	const observer = new MutationObserver(() => {
-		if (!raf) raf = requestAnimationFrame(clean);
+		if (!raf) raf = window.requestAnimationFrame(clean);
 	});
 	observer.observe(host, { childList: true, subtree: true });
 

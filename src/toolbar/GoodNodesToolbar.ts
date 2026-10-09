@@ -323,7 +323,7 @@ export class GoodNodesToolbar {
 		label: string,
 		value: string | number,
 		current: string | number,
-		action: (value: any) => void,
+		action: (value: string | number) => void,
 	): void {
 		const b = parent.createEl("button", { cls: "goodnodes-toolbar-segment", text: label });
 		b.toggleClass("is-active", value === current);

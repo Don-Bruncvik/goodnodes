@@ -1,5 +1,5 @@
 import esbuild from "esbuild";
-import builtins from "builtin-modules";
+import { builtinModules } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -67,7 +67,7 @@ const writeStyles = {
 const ctx = await esbuild.context({
   entryPoints: { main: "src/main.ts" },
   bundle: true,
-  external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtins],
+  external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtinModules],
   format: "cjs",
   platform: "browser",
   target: "es2020",

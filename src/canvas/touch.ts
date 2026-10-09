@@ -196,7 +196,7 @@ export class TouchGestures {
 		const sceneX = s.center.x / s.view.zoom - s.view.scrollX;
 		const sceneY = s.center.y / s.view.zoom - s.view.scrollY;
 		this.pending = { zoom, scrollX: center.x / zoom - sceneX, scrollY: center.y / zoom - sceneY };
-		if (!this.raf) this.raf = requestAnimationFrame(() => this.flush());
+		if (!this.raf) this.raf = window.requestAnimationFrame(() => this.flush());
 	}
 
 	private flush(): void {

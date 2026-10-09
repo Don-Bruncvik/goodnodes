@@ -57,7 +57,7 @@ export class BackgroundLayer {
 
 	private schedule(): void {
 		if (this.raf) return;
-		this.raf = requestAnimationFrame(() => {
+		this.raf = window.requestAnimationFrame(() => {
 			this.raf = 0;
 			this.draw();
 		});

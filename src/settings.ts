@@ -140,7 +140,6 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 				sl
 					.setLimits(0, 120, 5)
 					.setValue(s.palmMaxTouchSize)
-					.setDynamicTooltip()
 					.onChange((v) => ((s.palmMaxTouchSize = v), save())),
 			);
 
@@ -156,7 +155,6 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 				sl
 					.setLimits(3, 10, 1)
 					.setValue(s.scratchMinReversals)
-					.setDynamicTooltip()
 					.onChange((v) => ((s.scratchMinReversals = v), save())),
 			);
 		new Setting(containerEl)
@@ -166,7 +164,6 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 				sl
 					.setLimits(30, 95, 5)
 					.setValue(Math.round(s.scratchCoverage * 100))
-					.setDynamicTooltip()
 					.onChange((v) => ((s.scratchCoverage = v / 100), save())),
 			);
 		new Setting(containerEl)
@@ -201,7 +198,7 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 			.setDesc("Where images added to a canvas are stored. Empty = Obsidian's attachment folder setting.")
 			.addText((t) =>
 				t
-					.setPlaceholder("e.g. Attachments")
+					.setPlaceholder("E.g. Attachments")
 					.setValue(s.imageFolder)
 					.onChange((v) => ((s.imageFolder = v.trim()), save())),
 			);

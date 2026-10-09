@@ -141,3 +141,6 @@
 	border-radius: 50% !important;
 	corner-shape: round !important;
 }
+.goodnodes-file-picker {
+	display: none;
+}

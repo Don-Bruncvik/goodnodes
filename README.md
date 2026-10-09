@@ -2,7 +2,7 @@
 
 Handwritten notebooks for Obsidian, made for the iPad and Apple Pencil. A GoodNotes-style experience inside your vault:
 
-- **Infinite canvas**: a whiteboard per subject for mind maps, notes, images and shapes, built on [Excalidraw](https://github.com/excalidraw/excalidraw). Excalidraw's own toolbar stays as it is.
+- **Infinite canvas**: a whiteboard per subject for mind maps, notes, images and shapes, built on [Excalidraw](https://github.com/excalidraw/excalidraw), with the same GoodNotes-style toolbar as the PDF notebooks.
 - **PDF notebooks**: open any PDF from your vault, scroll through it, jump to a page, browse the outline or thumbnails, and write on the pages. The original PDF is never modified.
 
 **The pen draws and fingers move the page.** You never switch to a hand tool: one finger pans or scrolls, two fingers pinch-zoom, even while you hold the pencil.
@@ -55,7 +55,11 @@ In a notebook/PDF, the **…** menu adds, inserts or deletes pages, **inserts th
 
 ## Install
 
-### With BRAT (beta, recommended until it's in the community store)
+### From Community plugins
+
+*Settings → Community plugins → Browse* → search for **GoodNodes** → *Install* → *Enable* (once it is listed in the Obsidian Community directory).
+
+### With BRAT (beta versions)
 
 1. In Obsidian, install **BRAT** from *Settings → Community plugins → Browse*.
 2. *BRAT → Add beta plugin* → paste `https://github.com/Don-Bruncvik/goodnodes`.
@@ -88,6 +92,21 @@ Releases: bump `version` in `manifest.json`, `package.json` and `versions.json`,
 - Excalidraw's fonts are bundled into `main.js` (except the 12 MB CJK font), so text works offline. The Mermaid importer and most UI translations are left out to keep the bundle around 4 MB.
 - Finger input never reaches Excalidraw. A capture-phase gesture layer turns touches into pan and zoom (`updateScene` with scroll and zoom), while pen and mouse events pass through. Excalidraw's built-in pen mode can't pinch-zoom while the pencil is in use, which is why this layer exists.
 - PDFs are rendered with Obsidian's bundled pdf.js. Only visible pages ±2 are rendered, and canvases far away are released, so memory stays flat with page count.
+
+## Privacy and network use
+
+GoodNodes makes no network requests, has no telemetry and needs no account. All notebooks, notes and images stay in your vault.
+One exception comes from Excalidraw: its Chinese, Japanese and Korean handwriting font (Xiaolai, 12 MB) is not bundled and is downloaded from [esm.sh](https://esm.sh) only when you write such text on a whiteboard.
+
+## Third-party code
+
+- [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT) – whiteboard engine; its fonts (Excalifont, Nunito, Comic Shanns, Cascadia, Liberation Sans, Lilita One, Virgil: SIL Open Font License / their own licenses) are bundled.
+- [pdf-lib](https://github.com/Hopding/pdf-lib) (MIT) – creating notebooks and exporting PDFs with notes.
+- [perfect-freehand](https://github.com/steveruizok/perfect-freehand) (MIT) – pen strokes.
+- [React](https://react.dev) (MIT) – used by Excalidraw.
+- PDFs are rendered with the pdf.js (Apache 2.0) that ships with Obsidian.
+
+GoodNodes is an independent project and is not affiliated with Goodnotes Limited or with Obsidian.
 
 ## License
 

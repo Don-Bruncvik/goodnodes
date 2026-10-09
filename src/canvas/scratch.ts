@@ -63,8 +63,10 @@ export function handleFinishedStroke(api: ExcalidrawImperativeAPI, config: Scrat
 	});
 }
 
+type RotatableBox = { x: number; y: number; width: number; height: number; angle: number };
+
 function absolutePoints(el: ExcalidrawFreeDrawElement): Pt[] {
-	const pts = el.points.map(([x, y]) => ({ x: el.x + x, y: el.y + y }));
+	const pts = el.points.map((point: readonly [number, number]) => ({ x: el.x + point[0], y: el.y + point[1] }));
 	return el.angle ? rotateAll(pts, el) : pts;
 }
 
@@ -80,7 +82,7 @@ function boxPoints(el: ExcalidrawElement): Pt[] {
 	return el.angle ? rotateAll(pts, el) : pts;
 }
 
-function rotateAll(pts: Pt[], el: ExcalidrawElement): Pt[] {
+function rotateAll(pts: Pt[], el: RotatableBox): Pt[] {
 	const cx = el.x + el.width / 2;
 	const cy = el.y + el.height / 2;
 	const cos = Math.cos(el.angle);

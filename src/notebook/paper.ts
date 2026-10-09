@@ -55,7 +55,7 @@ export function drawPaperTemplate(
 				thickness: shape.width,
 			});
 		} else {
-			page.drawCircle({ x: shape.x, y: height - shape.y, size: shape.radius, color: color as any });
+			page.drawCircle({ x: shape.x, y: height - shape.y, size: shape.radius, color });
 		}
 	}
 }

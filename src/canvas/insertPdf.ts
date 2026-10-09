@@ -45,7 +45,7 @@ export async function insertPdfIntoCanvas(app: App, api: ExcalidrawImperativeAPI
 			const page = await doc.getPage(n);
 			const base = page.getViewport({ scale: 1 });
 			const viewport = page.getViewport({ scale: RENDER_WIDTH / base.width });
-			const canvas = document.createElement("canvas");
+			const canvas = createEl("canvas");
 			canvas.width = Math.round(viewport.width);
 			canvas.height = Math.round(viewport.height);
 			const ctx = canvas.getContext("2d", { alpha: false });
@@ -81,28 +81,31 @@ export async function insertPdfIntoCanvas(app: App, api: ExcalidrawImperativeAPI
 }
 
 function newFileId(): FileId {
-	const random =
-		globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+	const random = window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 	return random.replace(/-/g, "") as FileId;
 }
 
 /** A vault PDF, or one from the device ("From Files…"). */
 function choosePdf(app: App): Promise<PdfSource | null> {
 	return new Promise((resolve) => {
-		new PdfPicker(app, async (choice) => {
-			try {
-				if (choice === "device") {
-					const [file] = (await pickFiles("application/pdf,.pdf", { multiple: false })).filter(isPdf);
-					resolve(file ? { name: file.name.replace(/\.pdf$/i, ""), bytes: await file.arrayBuffer() } : null);
-				} else if (choice) {
-					resolve({ name: choice.basename, bytes: await app.vault.readBinary(choice) });
-				} else {
+		new PdfPicker(app, (choice) => {
+			void (async () => {
+				try {
+					if (choice === "device") {
+						const [file] = (await pickFiles("application/pdf,.pdf", { multiple: false })).filter(isPdf);
+						resolve(
+							file ? { name: file.name.replace(/\.pdf$/i, ""), bytes: await file.arrayBuffer() } : null,
+						);
+					} else if (choice) {
+						resolve({ name: choice.basename, bytes: await app.vault.readBinary(choice) });
+					} else {
+						resolve(null);
+					}
+				} catch (e) {
+					debug.error("cannot read PDF", e);
 					resolve(null);
 				}
-			} catch (e) {
-				debug.error("cannot read PDF", e);
-				resolve(null);
-			}
+			})();
 		}).open();
 	});
 }
@@ -117,7 +120,7 @@ class PdfPicker extends FuzzySuggestModal<PdfChoice> {
 		private done: (choice: PdfChoice | null) => void,
 	) {
 		super(app);
-		this.setPlaceholder("Insert a PDF from the vault, or pick “From Files…”");
+		this.setPlaceholder("Insert a PDF from the vault, or choose a file from this device.");
 	}
 
 	getItems(): PdfChoice[] {

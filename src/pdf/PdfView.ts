@@ -1,5 +1,6 @@
 import {
 	App,
+	EventRef,
 	FileView,
 	FuzzySuggestModal,
 	loadPdfJs,
@@ -19,6 +20,7 @@ import type GoodNodesPlugin from "../main";
 import { debug } from "../debug";
 import { createAnnotatedPdf } from "./export";
 import { openPdf } from "./pdfjs";
+import type { PdfDocumentProxy, PdfJsLib, PdfPageProxy, PdfRenderTask } from "./pdfjs";
 import { displayedToUnrotated, unrotatedToDisplayed } from "./coordinates";
 import { findEraserHits, splitStrokesByEraser } from "./eraser";
 import { PdfHistory } from "./history";
@@ -35,14 +37,14 @@ import { rememberToolColor, toolColors } from "../settings";
 import "./pdf.css";
 
 export const PDF_VIEW_TYPE = "goodnodes-pdf";
-type PdfDoc = any;
-type PdfPage = any;
+type PdfDoc = PdfDocumentProxy;
+type PdfPage = PdfPageProxy;
 /**
  * The size most pages have, used for every placeholder before a page is loaded.
  * Taking page 1 alone breaks books whose cover differs: every later page then
  * resized while scrolling, and the view jumped.
  */
-async function typicalPageSize(doc: any): Promise<{ width: number; height: number }> {
+async function typicalPageSize(doc: PdfDoc): Promise<{ width: number; height: number }> {
 	const count: number = doc.numPages;
 	const sample = [...new Set([1, 2, 3, 4, 5, 6, Math.ceil(count / 2), count])].filter((n) => n >= 1 && n <= count);
 	const tally = new Map<string, { width: number; height: number; n: number }>();
@@ -71,7 +73,7 @@ type PageSlot = {
 	canvas?: HTMLCanvasElement;
 	ink?: HTMLCanvasElement;
 	live?: HTMLCanvasElement;
-	task?: any;
+	task?: PdfRenderTask;
 	page?: PdfPage;
 	busy?: boolean;
 	/** Drawn at an old zoom: stays on screen (scaled) until the sharp render replaces it. */
@@ -103,7 +105,6 @@ const PEN_COLORS = [
 	"#9c36b5",
 	"#ffffff",
 ];
-const HIGHLIGHTER_COLORS = ["#ffd43b", "#69db7c", "#74c0fc", "#faa2c1", "#ffa94d", "#b197fc"];
 let sessionTool: Tool = "pen";
 
 export class PdfNotebookView extends FileView {
@@ -111,7 +112,7 @@ export class PdfNotebookView extends FileView {
 	zoom = 1;
 	private plugin: GoodNodesPlugin;
 	private doc: PdfDoc | null = null;
-	private pdfjs: any;
+	private pdfjs: PdfJsLib | null = null;
 	private scroller: HTMLElement;
 	private pagesEl: HTMLElement;
 	private toolbar: HTMLElement;
@@ -244,7 +245,7 @@ export class PdfNotebookView extends FileView {
 		this.scroller = this.contentEl.createDiv({ cls: "goodnodes-pdf-scroll" });
 		// Obsidian doesn't call onResize for every size change (window resize, iPad rotation,
 		// split view, our own sidebar), so watch the scroller directly.
-		const resizeObserver = new ResizeObserver(() => requestAnimationFrame(() => this.onResize()));
+		const resizeObserver = new ResizeObserver(() => window.requestAnimationFrame(() => this.onResize()));
 		resizeObserver.observe(this.scroller);
 		this.register(() => resizeObserver.disconnect());
 		this.pagesEl = this.scroller.createDiv({ cls: "goodnodes-pdf-pages" });
@@ -253,7 +254,7 @@ export class PdfNotebookView extends FileView {
 		this.toolbar.addEventListener("mousedown", (event) => {
 			if (this.textEditor && !(event.target as Element).closest("input")) event.preventDefault();
 		});
-		this.imageInput = document.createElement("input");
+		this.imageInput = createEl("input");
 		this.imageInput.type = "file";
 		this.imageInput.accept = "image/*";
 		this.imageInput.hidden = true;
@@ -315,9 +316,12 @@ export class PdfNotebookView extends FileView {
 			this.registerDomEvent(this.scroller, type, (e: TouchEvent) => e.stopPropagation(), { passive: true });
 		}
 		this.registerEvent(
-			(this.app.vault as any).on("raw", (path: string) => {
-				if (path === this.sidecarPath) void this.readExternalSidecar();
-			}),
+			(this.app.vault as unknown as { on(name: "raw", callback: (path: string) => void): EventRef }).on(
+				"raw",
+				(path: string) => {
+					if (path === this.sidecarPath) void this.readExternalSidecar();
+				},
+			),
 		);
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
@@ -354,7 +358,7 @@ export class PdfNotebookView extends FileView {
 		this.sidecarPath = `${file.path}.goodnodes.json`;
 		this.loadStartedAt = performance.now();
 		try {
-			this.pdfjs = await loadPdfJs();
+			this.pdfjs = (await loadPdfJs()) as PdfJsLib;
 			debug.log(`pdf.js ${this.pdfjs?.version ?? "version unavailable"}`);
 			const data = await this.app.vault.readBinary(file);
 			this.pdfSignature = `${file.stat.size}:${file.stat.mtime}`;
@@ -381,7 +385,7 @@ export class PdfNotebookView extends FileView {
 			if (saved && saved !== "closed") this.toggleSidebar(saved);
 			else if (saved === null && this.contentEl.clientWidth >= 900) this.toggleSidebar("pages");
 			// Refit once the page list exists: a vertical scrollbar may have taken some width.
-			requestAnimationFrame(() => this.onResize());
+			window.requestAnimationFrame(() => this.onResize());
 			this.observe();
 			this.restorePage(this.currentPage);
 			this.scheduleUpdate();
@@ -405,7 +409,7 @@ export class PdfNotebookView extends FileView {
 	private buildToolbar(): void {
 		this.goodnodesToolbar = new GoodNodesToolbar(this.toolbar, {
 			state: () => {
-				const tool = this.toolState.tool as ToolbarTool;
+				const tool = this.toolState.tool;
 				return {
 					active: tool,
 					color:
@@ -466,16 +470,17 @@ export class PdfNotebookView extends FileView {
 			width: (tool, value, index) => {
 				if (tool === "highlighter") this.plugin.settings.highlighterWidths[index] = value;
 				else this.plugin.settings.penWidths[index] = value;
-				this.applyToolWidth(tool as Tool, value);
+				this.applyToolWidth(tool, value);
 				this.goodnodesToolbar?.refresh();
 			},
 			setting: (key, value) => {
-				if (key === "penType") {
-					this.plugin.settings.penType = value as any;
-					this.toolState.pen = value as PenType;
+				if (key === "penType" && (value === "fountain" || value === "ball" || value === "brush")) {
+					this.plugin.settings.penType = value;
+					this.toolState.pen = value;
 				}
 				if (key === "drawAndHold") this.plugin.settings.drawAndHold = Boolean(value);
-				if (key === "eraserMode") this.plugin.settings.eraserMode = value as any;
+				if (key === "eraserMode" && (value === "precise" || value === "stroke"))
+					this.plugin.settings.eraserMode = value;
 				if (key === "eraserHighlighterOnly") this.plugin.settings.eraserHighlighterOnly = Boolean(value);
 				if (key === "eraserSize") this.plugin.settings.eraserSize = Number(value);
 				if (key === "textSize") {
@@ -486,11 +491,19 @@ export class PdfNotebookView extends FileView {
 					this.plugin.settings.canvasTextFont = Number(value);
 					if (this.editingText) this.editingText.item.font = Number(value);
 				}
-				if (key === "textAlign") {
-					this.plugin.settings.canvasTextAlign = value as any;
-					if (this.editingText) this.editingText.item.align = value as any;
+				if (key === "textAlign" && (value === "left" || value === "center" || value === "right")) {
+					this.plugin.settings.canvasTextAlign = value;
+					if (this.editingText) this.editingText.item.align = value;
 				}
-				if (key === "shape") this.plugin.settings.shapeKind = value as any;
+				if (
+					key === "shape" &&
+					(value === "line" ||
+						value === "arrow" ||
+						value === "rectangle" ||
+						value === "ellipse" ||
+						value === "diamond")
+				)
+					this.plugin.settings.shapeKind = value;
 				this.refreshEditorStyle();
 				this.scheduleSettingsSave();
 				this.goodnodesToolbar?.refresh();
@@ -718,21 +731,25 @@ export class PdfNotebookView extends FileView {
 
 	private updatePagePadding(): void {
 		if (!this.horizontal || !this.slots.length) {
-			this.pagesEl.style.paddingLeft = "";
-			this.pagesEl.style.paddingRight = "";
-			this.pagesEl.style.columnGap = "";
+			this.pagesEl.setCssProps({
+				"--goodnodes-page-padding-left": "16px",
+				"--goodnodes-page-padding-right": "16px",
+				"--goodnodes-page-gap": "12px",
+			});
 			return;
 		}
 		// Like a book: at fit zoom the neighbouring pages stay just off screen, so only
 		// the current page shows; zoomed in, a normal gap.
 		const pageWidth = this.baseWidth * this.pageScale * this.zoom;
 		const gap = this.zoom <= 1.001 ? Math.max(24, (this.scroller.clientWidth - pageWidth) / 2 + 12) : 24;
-		this.pagesEl.style.columnGap = `${gap}px`;
+		this.pagesEl.setCssProps({ "--goodnodes-page-gap": `${gap}px` });
 		const firstPadding = Math.max(16, (this.scroller.clientWidth - this.slots[0].el.offsetWidth) / 2);
 		const last = this.slots[this.slots.length - 1];
 		const lastPadding = Math.max(16, (this.scroller.clientWidth - last.el.offsetWidth) / 2);
-		this.pagesEl.style.paddingLeft = `${firstPadding}px`;
-		this.pagesEl.style.paddingRight = `${lastPadding}px`;
+		this.pagesEl.setCssProps({
+			"--goodnodes-page-padding-left": `${firstPadding}px`,
+			"--goodnodes-page-padding-right": `${lastPadding}px`,
+		});
 	}
 
 	private updateSnapping(): void {
@@ -823,14 +840,18 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private buildSlots(): void {
+		if (!this.doc) return;
+		const doc = this.doc;
 		this.observer?.disconnect();
 		this.slots = [];
 		this.pagesEl.empty();
-		for (let i = 0; i < this.doc.numPages; i++) {
+		for (let i = 0; i < doc.numPages; i++) {
 			const el = this.pagesEl.createDiv({ cls: "goodnodes-pdf-page" });
 			el.dataset.page = String(i);
-			el.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
-			el.style.height = `${this.baseHeight * this.pageScale * this.zoom}px`;
+			el.setCssProps({
+				"--goodnodes-page-width": `${this.baseWidth * this.pageScale * this.zoom}px`,
+				"--goodnodes-page-height": `${this.baseHeight * this.pageScale * this.zoom}px`,
+			});
 			this.slots.push({
 				el,
 				width: this.baseWidth,
@@ -840,9 +861,11 @@ export class PdfNotebookView extends FileView {
 				rotation: 0,
 			});
 		}
-		const addTile = this.pagesEl.createEl("button", { cls: "goodnodes-pdf-add-page", text: "+ Add page" });
-		addTile.style.width = `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`;
-		addTile.style.height = `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`;
+		const addTile = this.pagesEl.createEl("button", { cls: "goodnodes-pdf-add-page", text: "Add page" });
+		addTile.setCssProps({
+			"--goodnodes-page-width": `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`,
+			"--goodnodes-page-height": `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`,
+		});
 		addTile.onclick = () => void this.insertBlankPage(this.slots.length);
 		this.updatePagePadding();
 		this.refreshEditorStyle();
@@ -872,7 +895,7 @@ export class PdfNotebookView extends FileView {
 
 	private scheduleUpdate(): void {
 		if (this.raf) return;
-		this.raf = requestAnimationFrame(() => {
+		this.raf = window.requestAnimationFrame(() => {
 			this.raf = 0;
 			this.updateVisible();
 		});
@@ -953,8 +976,10 @@ export class PdfNotebookView extends FileView {
 				const slot = this.slots[index];
 				slot.width = raw.width;
 				slot.height = raw.height;
-				slot.el.style.width = `${raw.width * this.pageScale * this.zoom}px`;
-				slot.el.style.height = `${raw.height * this.pageScale * this.zoom}px`;
+				slot.el.setCssProps({
+					"--goodnodes-page-width": `${raw.width * this.pageScale * this.zoom}px`,
+					"--goodnodes-page-height": `${raw.height * this.pageScale * this.zoom}px`,
+				});
 				this.updatePagePadding();
 				this.restoreAnchor(anchor);
 			}
@@ -962,14 +987,12 @@ export class PdfNotebookView extends FileView {
 			const viewport = page.getViewport({ scale });
 			const dpr = Math.max(1, window.devicePixelRatio || 1);
 			const pixelScale = Math.min(dpr, Math.sqrt(4_000_000 / (viewport.width * viewport.height)));
-			canvas = document.createElement("canvas");
+			canvas = createEl("canvas");
 			canvas.className = "goodnodes-pdf-canvas";
 			canvas.width = Math.max(1, Math.floor(viewport.width * pixelScale));
 			canvas.height = Math.max(1, Math.floor(viewport.height * pixelScale));
 			// Fill the page box: if zoom/fit changed while this page was rendering, it is
 			// briefly blurry instead of drawn at the wrong size (the "broken first page").
-			canvas.style.width = "100%";
-			canvas.style.height = "100%";
 			const ctx = canvas.getContext("2d", { alpha: false })!;
 			const task = page.render({
 				canvasContext: ctx,
@@ -1028,15 +1051,13 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private makeOverlay(base: HTMLCanvasElement, className: string): HTMLCanvasElement {
-		const canvas = document.createElement("canvas");
+		const canvas = createEl("canvas");
 		canvas.className = className;
 		// Ink is as sharp as the page itself (≤ 4 MP, see renderPage); the live layer is
 		// sized lazily in drawLive and freed after each stroke.
 		const scale = 1;
 		canvas.width = Math.max(1, Math.floor(base.width * scale));
 		canvas.height = Math.max(1, Math.floor(base.height * scale));
-		canvas.style.width = "100%";
-		canvas.style.height = "100%";
 		return canvas;
 	}
 
@@ -1099,8 +1120,8 @@ export class PdfNotebookView extends FileView {
 			? Math.max(0, this.scrubber.clientWidth - this.scrubberThumb.offsetWidth)
 			: Math.max(0, this.scrubber.clientHeight - this.scrubberThumb.offsetHeight);
 		const offset = fraction * available;
-		this.scrubberThumb.style.transform = `translate${axis}(${offset}px)`;
-		this.scrubberBubble.style.transform = `translate${axis}(${offset}px)`;
+		this.scrubberThumb.setCssProps({ "--goodnodes-scrubber-transform": `translate${axis}(${offset}px)` });
+		this.scrubberBubble.setCssProps({ "--goodnodes-scrubber-transform": `translate${axis}(${offset}px)` });
 		const page = this.currentPage + 1;
 		this.scrubberBubble.setText(`Page ${page} / ${this.slots.length}`);
 	}
@@ -1130,7 +1151,7 @@ export class PdfNotebookView extends FileView {
 		event.preventDefault();
 		this.scrubberPendingY = this.horizontal ? event.clientX : event.clientY;
 		if (this.scrubberRaf) return;
-		this.scrubberRaf = requestAnimationFrame(() => {
+		this.scrubberRaf = window.requestAnimationFrame(() => {
 			this.scrubberRaf = 0;
 			this.applyScrubberPosition(this.scrubberPendingY);
 		});
@@ -1169,8 +1190,10 @@ export class PdfNotebookView extends FileView {
 				// Nothing on screen to anchor yet: just rescale, the restore scrolls afterwards.
 				this.pageScale = next;
 				for (const slot of this.slots) {
-					slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
-					slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+					slot.el.setCssProps({
+						"--goodnodes-page-width": `${slot.width * this.pageScale * this.zoom}px`,
+						"--goodnodes-page-height": `${slot.height * this.pageScale * this.zoom}px`,
+					});
 				}
 			} else {
 				this.relayout(() => (this.pageScale = next));
@@ -1193,8 +1216,10 @@ export class PdfNotebookView extends FileView {
 		this.updateSnapping();
 		this.markRenderedStale();
 		for (const slot of this.slots) {
-			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
-			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+			slot.el.setCssProps({
+				"--goodnodes-page-width": `${slot.width * this.pageScale * this.zoom}px`,
+				"--goodnodes-page-height": `${slot.height * this.pageScale * this.zoom}px`,
+			});
 		}
 		this.updateAddPageTile();
 		this.updatePagePadding();
@@ -1249,8 +1274,10 @@ export class PdfNotebookView extends FileView {
 	private updateAddPageTile(): void {
 		const tile = this.pagesEl.querySelector<HTMLElement>(".goodnodes-pdf-add-page");
 		if (!tile) return;
-		tile.style.width = `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`;
-		tile.style.height = `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`;
+		tile.setCssProps({
+			"--goodnodes-page-width": `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`,
+			"--goodnodes-page-height": `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`,
+		});
 	}
 
 	private pointerDown(event: PointerEvent): void {
@@ -1488,9 +1515,6 @@ export class PdfNotebookView extends FileView {
 		this.textEditor = editor;
 		editor.value = item.text ?? "";
 		editor.spellcheck = true;
-		editor.style.position = "absolute";
-		editor.style.zIndex = "8";
-		editor.style.resize = "none";
 		this.refreshEditorStyle();
 		editor.addEventListener("input", () => this.refreshEditorStyle());
 		editor.addEventListener("blur", () =>
@@ -1521,17 +1545,19 @@ export class PdfNotebookView extends FileView {
 			scale = this.pageScale * this.zoom;
 		const a = unrotatedToDisplayed(box.x, box.y, rotationInfo(slot));
 		const b = unrotatedToDisplayed(box.x + box.width, box.y + box.height, rotationInfo(slot));
-		editor.style.left = `${Math.min(a[0], b[0]) * scale}px`;
-		editor.style.top = `${Math.min(a[1], b[1]) * scale}px`;
-		editor.style.width = `${Math.abs(b[0] - a[0]) * scale}px`;
-		editor.style.font = `${item.width * scale}px ${fontFamily(item.font)}`;
-		// The font shorthand resets line-height; it must match the 1.25 the canvas uses.
-		editor.style.lineHeight = "1.25";
-		editor.style.color = item.color;
-		editor.style.textAlign = item.align ?? "left";
+		editor.setCssProps({
+			"--goodnodes-editor-left": `${Math.min(a[0], b[0]) * scale}px`,
+			"--goodnodes-editor-top": `${Math.min(a[1], b[1]) * scale}px`,
+			"--goodnodes-editor-width": `${Math.abs(b[0] - a[0]) * scale}px`,
+			"--goodnodes-editor-font": `${item.width * scale}px ${fontFamily(item.font)}`,
+			"--goodnodes-editor-color": item.color,
+			"--goodnodes-editor-align": item.align ?? "left",
+		});
 		// Grow with the content (the textarea's own wrapping decides the line count).
-		editor.style.height = "0px";
-		editor.style.height = `${Math.max(item.width * 1.25 * scale, editor.scrollHeight)}px`;
+		editor.setCssProps({ "--goodnodes-editor-height": "0px" });
+		editor.setCssProps({
+			"--goodnodes-editor-height": `${Math.max(item.width * 1.25 * scale, editor.scrollHeight)}px`,
+		});
 	}
 
 	private commitTextEditor(): void {
@@ -1557,7 +1583,7 @@ export class PdfNotebookView extends FileView {
 		}
 		const item = { ...active.item, id: newStrokeId(), text };
 		const box = itemBox(item),
-			measure = document.createElement("canvas").getContext("2d")!;
+			measure = createEl("canvas").getContext("2d")!;
 		measure.font = `${item.width}px ${fontFamily(item.font)}`;
 		const lines = layoutText(text, box.width, (line) => measure.measureText(line).width);
 		item.points[1][1] = box.y + lines.length * item.width * 1.25;
@@ -1601,7 +1627,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async insertChosenImage(file?: File): Promise<void> {
-		if (!file) return;
+		if (!file || !(this.file instanceof TFile)) return;
 		this.imageInput.value = "";
 		try {
 			const extension = file.name.split(".").pop()?.toLowerCase() || "png";
@@ -1611,7 +1637,7 @@ export class PdfNotebookView extends FileView {
 				const folder = this.plugin.settings.imageFolder.replace(/\/$/, "");
 				if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
 				path = `${folder}/${name}`;
-			} else path = await this.app.fileManager.getAvailablePathForAttachment(name, (this.file as TFile).path);
+			} else path = await this.app.fileManager.getAvailablePathForAttachment(name, this.file.path);
 			if (this.plugin.settings.imageFolder.trim()) {
 				const stem = path.replace(/\.[^.]+$/, ""),
 					suffix = path.match(/\.[^.]+$/)?.[0] ?? `.${extension}`;
@@ -1770,8 +1796,10 @@ export class PdfNotebookView extends FileView {
 					[x, y] = unrotatedToDisplayed(origin[0], origin[1], rotationInfo(slot));
 				slot.el.querySelector(".goodnodes-pdf-paste-bubble")?.remove();
 				const bubble = slot.el.createEl("button", { cls: "goodnodes-pdf-paste-bubble", text: "Paste" });
-				bubble.style.left = `${x * this.pageScale * this.zoom}px`;
-				bubble.style.top = `${y * this.pageScale * this.zoom}px`;
+				bubble.setCssProps({
+					"--goodnodes-item-left": `${x * this.pageScale * this.zoom}px`,
+					"--goodnodes-item-top": `${y * this.pageScale * this.zoom}px`,
+				});
 				bubble.onpointerdown = (event) => event.stopPropagation();
 				bubble.onclick = (event) => {
 					event.stopPropagation();
@@ -1857,10 +1885,12 @@ export class PdfNotebookView extends FileView {
 		};
 		selection.display = display;
 		const scale = this.pageScale * this.zoom;
-		selection.box.style.left = `${display.x * scale}px`;
-		selection.box.style.top = `${display.y * scale}px`;
-		selection.box.style.width = `${Math.max(24, display.width * scale)}px`;
-		selection.box.style.height = `${Math.max(24, display.height * scale)}px`;
+		selection.box.setCssProps({
+			"--goodnodes-selection-left": `${display.x * scale}px`,
+			"--goodnodes-selection-top": `${display.y * scale}px`,
+			"--goodnodes-selection-width": `${Math.max(24, display.width * scale)}px`,
+			"--goodnodes-selection-height": `${Math.max(24, display.height * scale)}px`,
+		});
 		// No room above the box (top of the page): the action bar goes below it.
 		selection.box.toggleClass("is-bar-below", display.y * scale < 52);
 	}
@@ -2066,7 +2096,8 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private blockStylusTouch(event: TouchEvent): void {
-		if ([...event.changedTouches].some((touch) => (touch as any).touchType === "stylus")) event.preventDefault();
+		if ([...event.changedTouches].some((touch) => (touch as Touch & { touchType?: string }).touchType === "stylus"))
+			event.preventDefault();
 	}
 
 	/** Finger touches (not the pencil, not a resting palm) currently on the screen. */
@@ -2107,7 +2138,9 @@ export class PdfNotebookView extends FileView {
 			visualScale: 1,
 		};
 		this.updateSnapping();
-		this.pagesEl.style.transformOrigin = `${centerX - pagesRect.left}px ${centerY - pagesRect.top}px`;
+		this.pagesEl.setCssProps({
+			"--goodnodes-pinch-origin": `${centerX - pagesRect.left}px ${centerY - pagesRect.top}px`,
+		});
 	}
 
 	private updatePinch(a: Touch, b: Touch): void {
@@ -2121,20 +2154,23 @@ export class PdfNotebookView extends FileView {
 				Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) / this.pinch.distance,
 			),
 		);
-		this.pagesEl.style.transform = `translate(${this.pinch.centerX - this.pinch.originX}px, ${this.pinch.centerY - this.pinch.originY}px) scale(${this.pinch.visualScale})`;
+		this.pagesEl.setCssProps({
+			"--goodnodes-pinch-transform": `translate(${this.pinch.centerX - this.pinch.originX}px, ${this.pinch.centerY - this.pinch.originY}px) scale(${this.pinch.visualScale})`,
+		});
 	}
 
 	private endPinch(): void {
 		if (!this.pinch) return;
 		const gesture = this.pinch;
-		this.pagesEl.style.transform = "";
-		this.pagesEl.style.transformOrigin = "";
+		this.pagesEl.setCssProps({ "--goodnodes-pinch-transform": "none", "--goodnodes-pinch-origin": "50% 50%" });
 		this.zoom = Math.max(this.minZoom, Math.min(4, gesture.zoom * gesture.visualScale));
 		this.markDirty();
 		this.markRenderedStale();
 		for (const slot of this.slots) {
-			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
-			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+			slot.el.setCssProps({
+				"--goodnodes-page-width": `${slot.width * this.pageScale * this.zoom}px`,
+				"--goodnodes-page-height": `${slot.height * this.pageScale * this.zoom}px`,
+			});
 		}
 		this.updateAddPageTile();
 		this.pinch = null;
@@ -2257,8 +2293,10 @@ export class PdfNotebookView extends FileView {
 			// Canvases were drawn at the old scale; they re-render at the new one.
 			this.markRenderedStale();
 			for (const slot of this.slots) {
-				slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
-				slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+				slot.el.setCssProps({
+					"--goodnodes-page-width": `${slot.width * this.pageScale * this.zoom}px`,
+					"--goodnodes-page-height": `${slot.height * this.pageScale * this.zoom}px`,
+				});
 			}
 			this.updateAddPageTile();
 			this.updatePagePadding();
@@ -2285,11 +2323,11 @@ export class PdfNotebookView extends FileView {
 				this.sidebarContent.createDiv({ cls: "goodnodes-pdf-empty", text: "This PDF has no outline" });
 				return;
 			}
-			const add = (item: any, depth: number) => {
+			const add = (item: import("./pdfjs").PdfOutlineItem, depth: number) => {
 				const row = this.sidebarContent!.createDiv({ cls: "goodnodes-pdf-outline-item" });
 				row.createSpan({ text: item.title });
 				const pageLabel = row.createSpan({ cls: "goodnodes-pdf-outline-page" });
-				row.style.paddingLeft = `${12 + depth * 14}px`;
+				row.setCssProps({ "--goodnodes-outline-indent": `${12 + depth * 14}px` });
 				row.onclick = () => void this.outlineJump(item);
 				const record = { row, page: null as number | null };
 				this.outlineItems.push(record);
@@ -2309,25 +2347,29 @@ export class PdfNotebookView extends FileView {
 		}
 	}
 
-	private async outlinePage(item: any): Promise<number | null> {
+	private async outlinePage(item: import("./pdfjs").PdfOutlineItem): Promise<number | null> {
+		const doc = this.doc;
+		if (!doc) return null;
 		try {
 			let destination = item.dest;
-			if (typeof destination === "string") destination = await this.doc.getDestination(destination);
+			if (typeof destination === "string") destination = await doc.getDestination(destination);
 			if (!destination) return null;
 			const reference = destination[0];
-			return typeof reference === "number" ? reference : await this.doc.getPageIndex(reference);
+			return typeof reference === "number" ? reference : await doc.getPageIndex(reference);
 		} catch {
 			return null;
 		}
 	}
 
-	private async outlineJump(item: any): Promise<void> {
+	private async outlineJump(item: import("./pdfjs").PdfOutlineItem): Promise<void> {
+		const doc = this.doc;
+		if (!doc) return;
 		try {
 			let destination = item.dest;
-			if (typeof destination === "string") destination = await this.doc.getDestination(destination);
+			if (typeof destination === "string") destination = await doc.getDestination(destination);
 			if (!destination) return;
 			const ref = destination[0];
-			const index = typeof ref === "number" ? ref : await this.doc.getPageIndex(ref);
+			const index = typeof ref === "number" ? ref : await doc.getPageIndex(ref);
 			this.jumpTo(index);
 			if (this.contentEl.clientWidth < 600) this.closeSidebar();
 		} catch (err) {
@@ -2373,7 +2415,7 @@ export class PdfNotebookView extends FileView {
 				root: this.sidebarContent,
 				rootMargin: "300px 0px",
 			});
-			requestAnimationFrame(() => this.onResize());
+			window.requestAnimationFrame(() => this.onResize());
 		}
 		this.renderSidebarTab();
 		this.scheduleSave();
@@ -2387,7 +2429,7 @@ export class PdfNotebookView extends FileView {
 		this.sidebar = null;
 		this.sidebarContent = null;
 		this.contentEl.removeClass("has-sidebar");
-		requestAnimationFrame(() => this.onResize());
+		window.requestAnimationFrame(() => this.onResize());
 		this.scheduleSave();
 	}
 
@@ -2446,7 +2488,7 @@ export class PdfNotebookView extends FileView {
 			this.thumbObserver.observe(item);
 		}
 		this.updateSidebarSelection();
-		if (this.sidebarTab === "pages") requestAnimationFrame(() => this.scrollSidebarToCurrent());
+		if (this.sidebarTab === "pages") window.requestAnimationFrame(() => this.scrollSidebarToCurrent());
 	}
 
 	private async renderThumbnail(index: number): Promise<void> {
@@ -2465,11 +2507,9 @@ export class PdfNotebookView extends FileView {
 			slot.unrotatedWidth = unrotatedViewport.width;
 			slot.unrotatedHeight = unrotatedViewport.height;
 			const viewport = page.getViewport({ scale: 150 / displayViewport.width });
-			const canvas = document.createElement("canvas");
+			const canvas = createEl("canvas");
 			canvas.width = Math.ceil(viewport.width);
 			canvas.height = Math.ceil(viewport.height);
-			canvas.style.width = "100%";
-			canvas.style.height = "auto";
 			sheet.appendChild(canvas);
 			await page.render({ canvasContext: canvas.getContext("2d", { alpha: false })!, viewport }).promise;
 			this.drawThumbnailInk(index, canvas);
@@ -2584,6 +2624,8 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async loadSidecar(file: TFile, pdfSize: number): Promise<void> {
+		const doc = this.doc;
+		if (!doc) return;
 		this.loadingSidecar = true;
 		try {
 			if (!(await this.app.vault.adapter.exists(this.sidecarPath))) {
@@ -2598,7 +2640,7 @@ export class PdfNotebookView extends FileView {
 				return;
 			}
 			const text = await this.app.vault.adapter.read(this.sidecarPath);
-			const parsed = parseSidecar(text, this.doc.numPages);
+			const parsed = parseSidecar(text, doc.numPages);
 			if (!parsed) {
 				debug.log(`Ignoring invalid or unsupported PDF sidecar: ${this.sidecarPath}`, "warn");
 				return;
@@ -2626,7 +2668,8 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private makeSidecar(): PdfSidecar {
-		const file = this.file as TFile;
+		if (!(this.file instanceof TFile)) throw new Error("Cannot create a PDF sidecar without an open PDF");
+		const file = this.file;
 		const pages: PdfSidecar["pages"] = {};
 		for (const [index, strokes] of this.strokes) if (strokes.length) pages[String(index)] = strokes;
 		return {
@@ -2708,8 +2751,10 @@ export class PdfNotebookView extends FileView {
 			this.history.clear();
 			this.releaseAll();
 			for (const slot of this.slots) {
-				slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
-				slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+				slot.el.setCssProps({
+					"--goodnodes-page-width": `${slot.width * this.pageScale * this.zoom}px`,
+					"--goodnodes-page-height": `${slot.height * this.pageScale * this.zoom}px`,
+				});
 			}
 			for (const [index] of this.strokes) this.drawCommittedInk(index);
 			this.restorePage(this.currentPage);
@@ -2744,25 +2789,27 @@ export class PdfNotebookView extends FileView {
 		const files = this.app.vault
 			.getFiles()
 			.filter((file) => file.extension.toLowerCase() === "pdf" && file.path !== this.file?.path);
-		new InsertPdfModal(this.app, files, async (file) => {
-			let bytes: ArrayBuffer;
-			let name: string;
-			if (!file) {
-				const picked = await pickFiles("application/pdf,.pdf", { multiple: false });
-				if (!picked.length) return;
-				bytes = await picked[0].arrayBuffer();
-				name = picked[0].name;
-			} else {
-				bytes = await this.app.vault.readBinary(file);
-				name = file.basename;
-			}
-			try {
-				const count = await this.insertPdfBytes(bytes, this.currentPage + 1);
-				if (count) new Notice(`Inserted ${count} pages`);
-			} catch (err) {
-				debug.error(`Could not insert PDF pages from ${name}`, err);
-				new Notice("Could not insert PDF pages. See GoodNodes debug log.");
-			}
+		new InsertPdfModal(this.app, files, (file) => {
+			void (async () => {
+				let bytes: ArrayBuffer;
+				let name: string;
+				if (!file) {
+					const picked = await pickFiles("application/pdf,.pdf", { multiple: false });
+					if (!picked.length) return;
+					bytes = await picked[0].arrayBuffer();
+					name = picked[0].name;
+				} else {
+					bytes = await this.app.vault.readBinary(file);
+					name = file.basename;
+				}
+				try {
+					const count = await this.insertPdfBytes(bytes, this.currentPage + 1);
+					if (count) new Notice(`Inserted ${count} pages`);
+				} catch (err) {
+					debug.error(`Could not insert PDF pages from ${name}`, err);
+					new Notice("Could not insert PDF pages. See GoodNodes debug log.");
+				}
+			})();
 		}).open();
 	}
 
@@ -2849,7 +2896,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async reloadInPlace(bytes: ArrayBuffer, page: number): Promise<void> {
-		if (!this.pdfjs) this.pdfjs = await loadPdfJs();
+		if (!this.pdfjs) this.pdfjs = (await loadPdfJs()) as PdfJsLib;
 		this.observer?.disconnect();
 		this.observer = null;
 		this.releaseAll();
@@ -2900,8 +2947,8 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private async exportAnnotated(): Promise<void> {
-		const file = this.file as TFile;
-		if (!file) return;
+		if (!(this.file instanceof TFile)) return;
+		const file = this.file;
 		try {
 			const source = await this.app.vault.readBinary(file);
 			const bytes = await createAnnotatedPdf(source, this.strokes, {
@@ -2913,7 +2960,7 @@ export class PdfNotebookView extends FileView {
 						b = unrotatedToDisplayed(box.x + box.width, box.y + box.height, info),
 						left = Math.min(a[0], b[0]),
 						top = Math.min(a[1], b[1]),
-						canvas = document.createElement("canvas");
+						canvas = createEl("canvas");
 					canvas.width = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) * 4));
 					canvas.height = Math.max(1, Math.ceil(Math.abs(b[1] - a[1]) * 4));
 					paintItem(
@@ -2946,7 +2993,7 @@ export class PdfNotebookView extends FileView {
 						image.src = url;
 					});
 					URL.revokeObjectURL(url);
-					const canvas = document.createElement("canvas");
+					const canvas = createEl("canvas");
 					canvas.width = image.naturalWidth;
 					canvas.height = image.naturalHeight;
 					canvas.getContext("2d")!.drawImage(image, 0, 0);
@@ -2996,7 +3043,7 @@ export class PdfNotebookView extends FileView {
 		this.notebookMeta = undefined;
 		this.pdfSignature = "";
 		this.history.clear();
-		this.doc?.destroy?.();
+		void this.doc?.destroy();
 		this.doc = null;
 		this.pagesEl.empty();
 		this.sidebar?.remove();

@@ -132,7 +132,7 @@ function fromDataURL(dataURL: string): ArrayBuffer {
 	const comma = dataURL.indexOf(",");
 	const meta = dataURL.slice(0, comma);
 	const body = dataURL.slice(comma + 1);
-	if (!meta.endsWith(";base64")) return new TextEncoder().encode(decodeURIComponent(body)).buffer as ArrayBuffer;
+	if (!meta.endsWith(";base64")) return new TextEncoder().encode(decodeURIComponent(body)).buffer;
 	const bin = atob(body);
 	const bytes = new Uint8Array(bin.length);
 	for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

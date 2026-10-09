@@ -150,7 +150,7 @@ class NotebookOptionsModal extends Modal {
 	}
 	onOpen(): void {
 		this.modalEl.addClass("goodnodes-notebook-modal");
-		this.titleEl.setText("Create Notebook");
+		this.titleEl.setText("Create notebook");
 		const content = this.contentEl;
 		content.createEl("label", { text: "Title" });
 		this.titleInput = content.createEl("input", {
@@ -165,7 +165,7 @@ class NotebookOptionsModal extends Modal {
 				this.submit();
 			}
 		};
-		content.createEl("div", { cls: "goodnodes-notebook-section-title", text: "Cover" });
+		content.createDiv({ cls: "goodnodes-notebook-section-title", text: "Cover" });
 		const coverRow = content.createDiv({ cls: "goodnodes-notebook-swatches" });
 		for (const cover of [null, ...COVERS]) {
 			const button = coverRow.createEl("button", {
@@ -180,7 +180,7 @@ class NotebookOptionsModal extends Modal {
 				coverRow.querySelectorAll("button").forEach((el) => el.toggleClass("is-selected", el === button));
 			};
 		}
-		content.createEl("div", { cls: "goodnodes-notebook-section-title", text: "Paper" });
+		content.createDiv({ cls: "goodnodes-notebook-section-title", text: "Paper" });
 		const tiles = content.createDiv({ cls: "goodnodes-notebook-templates" });
 		this.preview = content.createDiv({ cls: "goodnodes-notebook-preview" });
 		for (const template of TEMPLATES) {
@@ -188,16 +188,16 @@ class NotebookOptionsModal extends Modal {
 				cls: "goodnodes-notebook-template",
 				attr: { "aria-label": template },
 			});
-			tile.innerHTML = previewSvg(template);
+			tile.append(previewSvg(template));
 			tile.createSpan({ text: templateLabel(template) });
 			tile.toggleClass("is-selected", template === this.options.template);
 			tile.onclick = () => {
 				this.options.template = template;
 				tiles.querySelectorAll("button").forEach((el) => el.toggleClass("is-selected", el === tile));
-				this.preview.innerHTML = previewSvg(template);
+				this.preview.replaceChildren(previewSvg(template));
 			};
 		}
-		this.preview.innerHTML = previewSvg(this.options.template);
+		this.preview.append(previewSvg(this.options.template));
 		this.choiceRow(content, "Paper size", "size", ["a4", "letter"]);
 		this.choiceRow(content, "Orientation", "orientation", ["portrait", "landscape"]);
 		const pagesRow = content.createDiv({ cls: "goodnodes-notebook-pages-row" });
@@ -254,21 +254,33 @@ class NotebookOptionsModal extends Modal {
 function templateLabel(template: PaperTemplate): string {
 	return template === "ruled-narrow" ? "Narrow ruled" : template[0].toUpperCase() + template.slice(1);
 }
-function previewSvg(template: PaperTemplate): string {
+function previewSvg(template: PaperTemplate): SVGSVGElement {
 	// Half-A4 geometry (points) scaled into a 100×140 viewBox: spacing looks 2× wider,
 	// otherwise grid and dots blur into grey at thumbnail size.
 	const W = 595.28 / 2;
 	const H = 841.89 / 2;
 	const sx = 100 / W;
 	const sy = 140 / H;
-	const marks = templateShapes(template, W, H)
-		.map((s) =>
-			s.type === "line"
-				? `<line x1="${s.x1 * sx}" y1="${s.y1 * sy}" x2="${s.x2 * sx}" y2="${s.y2 * sy}" stroke="rgb(${s.color.map((c) => Math.round(c * 210)).join(",")})" stroke-width="0.9"/>`
-				: `<circle cx="${s.x * sx}" cy="${s.y * sy}" r="0.75" fill="#999"/>`,
-		)
-		.join("");
-	return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect width="100" height="140" fill="white"/>${marks}</svg>`;
+	const svg = createSvg("svg", { attr: { viewBox: "0 0 100 140", "aria-hidden": "true" } });
+	svg.createSvg("rect", { attr: { width: 100, height: 140, fill: "white" } });
+	for (const shape of templateShapes(template, W, H)) {
+		if (shape.type === "line") {
+			const line = svg.createSvg("line");
+			line.setAttribute("x1", String(shape.x1 * sx));
+			line.setAttribute("y1", String(shape.y1 * sy));
+			line.setAttribute("x2", String(shape.x2 * sx));
+			line.setAttribute("y2", String(shape.y2 * sy));
+			line.setAttribute("stroke", `rgb(${shape.color.map((c) => Math.round(c * 210)).join(",")})`);
+			line.setAttribute("stroke-width", "0.9");
+		} else {
+			const circle = svg.createSvg("circle");
+			circle.setAttribute("cx", String(shape.x * sx));
+			circle.setAttribute("cy", String(shape.y * sy));
+			circle.setAttribute("r", "0.75");
+			circle.setAttribute("fill", "#999");
+		}
+	}
+	return svg;
 }
 function parseHex(hex: string): [number, number, number] {
 	const value = hex.replace("#", "");
@@ -302,7 +314,7 @@ async function imageToJpeg(file: File): Promise<{ bytes: Uint8Array; width: numb
 		const sourceWidth = bitmap?.width ?? image!.naturalWidth;
 		const sourceHeight = bitmap?.height ?? image!.naturalHeight;
 		const scale = Math.min(1, 2480 / Math.max(sourceWidth, sourceHeight));
-		const canvas = document.createElement("canvas");
+		const canvas = createEl("canvas");
 		canvas.width = Math.max(1, Math.round(sourceWidth * scale));
 		canvas.height = Math.max(1, Math.round(sourceHeight * scale));
 		const context = canvas.getContext("2d")!;
