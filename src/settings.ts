@@ -31,7 +31,11 @@ export interface GoodNodesSettings {
 	openPdfByDefault: boolean;
 	/** Folder for images pasted into canvases; empty = Obsidian's attachment setting. */
 	imageFolder: string;
+	/** Folder where "Import PDF" puts PDFs; empty = vault root. */
+	importFolder: string;
 	showDebugRibbon: boolean;
+	/** Canvas library items ("Add to library"), shared by all notebooks. Not shown in the tab. */
+	library: unknown[];
 }
 
 export const DEFAULT_SETTINGS: GoodNodesSettings = {
@@ -50,7 +54,9 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	palmMaxTouchSize: 0,
 	openPdfByDefault: false,
 	imageFolder: "",
+	importFolder: "GoodNodes",
 	showDebugRibbon: false,
+	library: [],
 };
 
 export class GoodNodesSettingTab extends PluginSettingTab {
@@ -130,6 +136,15 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 					.setPlaceholder("e.g. Attachments")
 					.setValue(s.imageFolder)
 					.onChange((v) => ((s.imageFolder = v.trim()), save())),
+			);
+		new Setting(containerEl)
+			.setName("PDF import folder")
+			.setDesc('Where PDFs added with "Import PDF" in the GoodNodes library are copied. Empty = vault root.')
+			.addText((t) =>
+				t
+					.setPlaceholder("GoodNodes")
+					.setValue(s.importFolder)
+					.onChange((v) => ((s.importFolder = v.trim()), save())),
 			);
 
 		new Setting(containerEl).setName("Troubleshooting").setHeading();

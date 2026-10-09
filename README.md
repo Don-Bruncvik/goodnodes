@@ -33,8 +33,9 @@ Everything is a plain file in your vault, so any sync method works (Obsidian Syn
 
 ## Usage
 
-- **New canvas**: click the ✏️ ribbon icon, or right-click a folder and choose *New GoodNodes canvas*. Tap any `.goodnodes` file to open it.
-- **PDF as notebook**: click the 📖 ribbon icon and pick a PDF, or right-click a PDF and choose *Open as GoodNodes notebook*. In settings you can make tapping a PDF always open it in GoodNodes.
+- **Library**: the 📚 ribbon icon opens the GoodNodes library, a home screen with covers of all your notebooks and PDFs, search, and the **+ New notebook** and **Import PDF** buttons. On the iPad, *Import PDF* opens the Files app; the PDF is copied into the `GoodNodes` folder (configurable) and opened as a notebook.
+- **New canvas**: *+ New notebook* in the library, the ✏️ ribbon icon, or right-click a folder → *New GoodNodes canvas*. Tap any `.goodnodes` file to open it.
+- **PDF as notebook**: tap it in the library, or right-click a PDF → *Open as GoodNodes notebook*. Right-click a folder → *Import PDF here*. In settings you can make tapping a PDF in the file list always open it in GoodNodes.
 - **Pen color & width**: tap the pen once to select it, tap it again to open its color and width picker. Your choice is remembered.
 - **Scratch out**: scribble firmly back and forth (at least ~4 direction changes) over handwriting. Strokes mostly covered by the scribble disappear together with the scribble. One or two lines through a word, or a scribble over empty space, stay as normal strokes. You can tune or disable this in settings.
 
@@ -67,6 +68,8 @@ Open `test-vault/` as a vault in Obsidian to try it. On the iPad there are no de
 Releases: bump `version` in `manifest.json`, `package.json` and `versions.json`, then push a tag with the same version. GitHub Actions builds and publishes the release.
 
 ### Notes on the implementation
+
+- Excalidraw is only the drawing engine: its menu, help, library site links and AI features are replaced or removed. The canvas library ("Add to library") is GoodNodes' own and is shared by all notebooks.
 
 - Excalidraw's fonts are bundled into `main.js` (except the 12 MB CJK font), so text works offline. The Mermaid importer and most UI translations are left out to keep the bundle around 4 MB.
 - Finger input never reaches Excalidraw. A capture-phase gesture layer turns touches into pan and zoom (`updateScene` with scroll and zoom), while pen and mouse events pass through. Excalidraw's built-in pen mode can't pinch-zoom while the pencil is in use, which is why this layer exists.

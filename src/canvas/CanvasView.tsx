@@ -1,8 +1,20 @@
 import { TFile, TextFileView, WorkspaceLeaf } from "obsidian";
 import { StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { CaptureUpdateAction, Excalidraw, getSceneVersion, restore, serializeAsJSON } from "@excalidraw/excalidraw";
-import type { AppState, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
+import {
+	CaptureUpdateAction,
+	Excalidraw,
+	MainMenu,
+	getSceneVersion,
+	restore,
+	serializeAsJSON,
+} from "@excalidraw/excalidraw";
+import type {
+	AppState,
+	ExcalidrawImperativeAPI,
+	ExcalidrawInitialDataState,
+	LibraryItems,
+} from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import "@excalidraw/excalidraw/index.css";
 import "./canvas.css";
@@ -13,6 +25,8 @@ import { TouchGestures, type Viewport } from "./touch";
 import { handleFinishedStroke } from "./scratch";
 import { CanvasImages, type StoredFile } from "./images";
 import { PenPopover, type PenChoice } from "./penPopover";
+import { debrandExcalidraw } from "./debrand";
+import { GoodNodesHelpModal } from "../help";
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
@@ -207,10 +221,12 @@ export class CanvasView extends TextFileView {
 				zoom: { value: this.viewport.zoom as AppState["zoom"]["value"] },
 			},
 			scrollToContent: false,
+			libraryItems: this.plugin.settings.library as LibraryItems,
 		};
 
 		const host = this.contentEl.createDiv({ cls: "goodnodes-canvas-host" });
 		host.dataset.tool = "freedraw";
+		this.unsubs.push(debrandExcalidraw(host, () => new GoodNodesHelpModal(this.app).open()));
 		this.penPopover = new PenPopover(
 			host,
 			() => ({ color: this.plugin.settings.canvasPenColor, width: this.plugin.settings.canvasPenWidth }),
@@ -246,6 +262,8 @@ export class CanvasView extends TextFileView {
 					theme={this.isDark() ? "dark" : "light"}
 					background={this.background}
 					onBackground={(b) => this.setBackground(b)}
+					onHelp={() => new GoodNodesHelpModal(this.app).open()}
+					onLibraryChange={(items) => this.saveLibrary(items)}
 					onApi={(api) => {
 						if (mountId === this.mountId) this.onApi(api, file);
 					}}
@@ -374,6 +392,15 @@ export class CanvasView extends TextFileView {
 		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
 	}
 
+	private saveLibraryTimer = 0;
+
+	/** The library belongs to GoodNodes (shared by all notebooks), not to Excalidraw's site. */
+	private saveLibrary(items: LibraryItems): void {
+		this.plugin.settings.library = [...items];
+		window.clearTimeout(this.saveLibraryTimer);
+		this.saveLibraryTimer = window.setTimeout(() => void this.plugin.saveSettings(), 500);
+	}
+
 	private storeNewImages(): void {
 		const api = this.api;
 		const file = this.file;
@@ -452,6 +479,8 @@ function CanvasApp(props: {
 	theme: "light" | "dark";
 	background: BackgroundSettings;
 	onBackground: (b: BackgroundSettings) => void;
+	onHelp: () => void;
+	onLibraryChange: (items: LibraryItems) => void;
 	onApi: (api: ExcalidrawImperativeAPI) => void;
 }) {
 	const [background, setBackground] = useState(props.background);
@@ -468,6 +497,9 @@ function CanvasApp(props: {
 			theme={props.theme}
 			handleKeyboardGlobally={false}
 			autoFocus={false}
+			// No "text to diagram" / magic frame: those call Excalidraw's AI services.
+			aiEnabled={false}
+			onLibraryChange={props.onLibraryChange}
 			UIOptions={{
 				canvasActions: {
 					// The file is managed by Obsidian; the paper is our background layer.
@@ -517,6 +549,15 @@ function CanvasApp(props: {
 					)}
 				</div>
 			)}
-		/>
+		>
+			{/* GoodNodes' own menu instead of Excalidraw's (docs, GitHub, Discord, socials). */}
+			<MainMenu>
+				<MainMenu.DefaultItems.SaveAsImage />
+				<MainMenu.DefaultItems.SearchMenu />
+				<MainMenu.Item onSelect={props.onHelp}>GoodNodes help</MainMenu.Item>
+				<MainMenu.Separator />
+				<MainMenu.DefaultItems.ClearCanvas />
+			</MainMenu>
+		</Excalidraw>
 	);
 }

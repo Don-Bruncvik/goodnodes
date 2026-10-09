@@ -51,3 +51,20 @@
 .goodnodes-debug-event {
 	color: #aaa;
 }
+
+/* ---------- help modal ---------- */
+.goodnodes-help h4 {
+	margin: 1em 0 0.4em;
+}
+.goodnodes-help ul {
+	margin: 0;
+	padding-left: 1.2em;
+}
+.goodnodes-help li {
+	margin: 0.25em 0;
+}
+.goodnodes-help-footer {
+	margin-top: 1.2em;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}

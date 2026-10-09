@@ -25,9 +25,10 @@ Na Macu som overil všetko, čo sa dá bez pera. Toto sa dá overiť len na iPad
 13. Vlož obrázok (ikona obrázka v paneli). Vo vaulte pribudne `.png`/`.jpg` súbor.
 14. Vodorovný ťah perom alebo prstom na plátne nesmie otvoriť bočný panel Obsidianu.
 15. Zatvor Obsidian (aj z prepínača aplikácií), znovu ho otvor a otvor zošit. Všetko je na mieste, aj pozadie.
+16. Klepni na „?“ vpravo dole alebo na ☰ → GoodNodes help: otvorí sa pomocník GoodNodes (nie dokumentácia Excalidrawu). V ☰ nie sú odkazy na GitHub ani Discord, v knižnici nie je „Browse libraries“.
 
 ## B. PDF zošit
-1. Klepni na 📖 v ribbone a vyber väčšie PDF (napr. učebnicu). Prvá strana sa má zobraziť do 1 až 2 s.
+1. Klepni na 📚 v ribbone (knižnica GoodNodes) a potom na **Import PDF**. Otvorí sa appka Súbory: vyber PDF. Skopíruje sa do priečinka `GoodNodes` a hneď sa otvorí. Prvá strana sa má zobraziť do 1 až 2 s. V knižnici uvidíš obálky všetkých zošitov a PDF.
 2. Prstom scrolluj rýchlo hore a dole. Scroll je plynulý a strany sa dokresľujú.
 3. Dvoma prstami približuj. Počas gesta sa strana zväčší, po pustení sa zaostrí.
 4. Píš perom do strany. Pero nesmie scrollovať stránku.

@@ -1,7 +1,8 @@
-import { FuzzySuggestModal, Plugin, TFile, TFolder, normalizePath } from "obsidian";
+import { Plugin, TFile, TFolder, normalizePath } from "obsidian";
 import { debug, DebugPanel } from "./debug";
 import { CANVAS_EXTENSION, CANVAS_VIEW_TYPE, CanvasView, emptyCanvasFile } from "./canvas/CanvasView";
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
+import { HOME_VIEW_TYPE, HomeView, importPdfs } from "./home/HomeView";
 import { DEFAULT_SETTINGS, GoodNodesSettingTab, type GoodNodesSettings } from "./settings";
 
 export default class GoodNodesPlugin extends Plugin {
@@ -19,10 +20,11 @@ export default class GoodNodesPlugin extends Plugin {
 		this.registerView(CANVAS_VIEW_TYPE, (leaf) => new CanvasView(leaf, this));
 		this.registerExtensions([CANVAS_EXTENSION], CANVAS_VIEW_TYPE);
 		this.registerView(PDF_VIEW_TYPE, (leaf) => new PdfNotebookView(leaf, this));
+		this.registerView(HOME_VIEW_TYPE, (leaf) => new HomeView(leaf, this));
 		if (this.settings.openPdfByDefault) this.takeOverPdf();
 
 		this.addRibbonIcon("pencil", "New GoodNodes canvas", () => void this.createCanvas());
-		this.addRibbonIcon("book-open", "Open PDF as GoodNodes notebook", () => new PdfPickerModal(this).open());
+		this.addRibbonIcon("library", "GoodNodes library", () => void this.openLibrary());
 		this.updateDebugRibbon();
 
 		this.registerEvent(
@@ -33,6 +35,15 @@ export default class GoodNodesPlugin extends Plugin {
 							.setTitle("New GoodNodes canvas")
 							.setIcon("pencil")
 							.onClick(() => void this.createCanvas(file)),
+					);
+					menu.addItem((item) =>
+						item
+							.setTitle("Import PDF here")
+							.setIcon("file-plus")
+							.onClick(async () => {
+								const [first] = await importPdfs(this, file);
+								if (first) await this.openPdf(first);
+							}),
 					);
 				} else if (file instanceof TFile && file.extension === "pdf") {
 					menu.addItem((item) =>
@@ -123,6 +134,14 @@ export default class GoodNodesPlugin extends Plugin {
 		await this.app.workspace.getLeaf(true).openFile(file);
 	}
 
+	/** The GoodNodes library (home screen): all notebooks and PDFs, new notebook, import PDF. */
+	async openLibrary(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(HOME_VIEW_TYPE)[0];
+		const leaf = existing ?? this.app.workspace.getLeaf(true);
+		if (!existing) await leaf.setViewState({ type: HOME_VIEW_TYPE, active: true });
+		this.app.workspace.revealLeaf(leaf);
+	}
+
 	async openPdf(file: TFile): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(true);
 		await leaf.setViewState({ type: PDF_VIEW_TYPE, state: { file: file.path }, active: true });
@@ -133,20 +152,4 @@ interface ViewRegistry {
 	typeByExtension?: Record<string, string>;
 	registerExtensions?(extensions: string[], viewType: string): void;
 	unregisterExtensions?(extensions: string[]): void;
-}
-
-class PdfPickerModal extends FuzzySuggestModal<TFile> {
-	constructor(private plugin: GoodNodesPlugin) {
-		super(plugin.app);
-		this.setPlaceholder("Pick a PDF to open as notebook");
-	}
-	getItems(): TFile[] {
-		return this.app.vault.getFiles().filter((f) => f.extension === "pdf");
-	}
-	getItemText(file: TFile): string {
-		return file.path;
-	}
-	onChooseItem(file: TFile): void {
-		void this.plugin.openPdf(file);
-	}
 }

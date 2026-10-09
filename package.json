@@ -1,6 +1,6 @@
 {
   "name": "goodnodes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "GoodNotes-style handwriting for Obsidian: infinite canvas and PDF notebooks, pen draws, fingers pan & zoom.",
   "main": "main.js",
   "private": true,

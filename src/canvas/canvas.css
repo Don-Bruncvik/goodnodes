@@ -173,3 +173,9 @@
 .theme-dark .goodnodes-pen-popover .goodnodes-pen-custom .goodnodes-pen-swatch-fill {
 	filter: none;
 }
+
+/* ---------- GoodNodes, not Excalidraw ---------- */
+/* Library: no link to Excalidraw's public library site. */
+.goodnodes-canvas-host .library-menu-browse-button {
+	display: none !important;
+}

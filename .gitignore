@@ -14,3 +14,4 @@ test-vault/**/*.goodnodes.json
 test-vault/**/* (annotated)*.pdf
 test-vault/.obsidian/plugins/
 test-vault/.obsidian/appearance.json
+test-vault/GoodNodes/

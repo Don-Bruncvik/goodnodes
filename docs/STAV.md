@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.2.0)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.3.0)
 
 ## Výsledky spike M0
 
@@ -21,6 +21,10 @@
 **0.2.0 (po prvom teste na iPade):**
 - Nastavenie pera sa otvára klepnutím na už vybraté pero, v plátne aj v PDF. Farba a hrúbka sa pamätajú. Ľavý panel Excalidrawu sa pri pere nezobrazuje.
 - PDF v štýle GoodNotes: zjednodušený panel nástrojov, ľavý panel so záložkami Strany / Obsah / Záložky, záložky strán, posuvník, ktorým sa dá ťahať po stranách, a menu „…“ (zoom, prejsť na stranu, export).
+
+**0.3.0:**
+- Knižnica GoodNodes (📚): domovská obrazovka s obálkami zošitov a PDF, hľadaním, tlačidlami „+ New notebook“ a „Import PDF“ (z appky Súbory). V menu priečinka pribudlo „Import PDF here“.
+- Plátno už nemá prvky Excalidrawu: vlastné hlavné menu, vlastný pomocník (aj pod „?“), knižnica bez odkazov na Excalidraw, ktorú zdieľajú všetky zošity, a žiadne AI ani Mermaid.
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 
