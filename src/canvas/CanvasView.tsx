@@ -1,4 +1,4 @@
-import { TFile, TextFileView, WorkspaceLeaf } from "obsidian";
+import { Menu, TFile, TextFileView, WorkspaceLeaf } from "obsidian";
 import { StrictMode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -24,11 +24,25 @@ import { BackgroundLayer, DEFAULT_BACKGROUND, type BackgroundKind, type Backgrou
 import { TouchGestures, type Viewport } from "./touch";
 import { handleFinishedStroke } from "./scratch";
 import { CanvasImages, type StoredFile } from "./images";
-import { PenPopover, type PenChoice } from "./penPopover";
-import { TextPopover, type TextChoice } from "./textPopover";
 import { debrandExcalidraw } from "./debrand";
 import { GoodNodesHelpModal } from "../help";
 import { insertPdfIntoCanvas } from "./insertPdf";
+import { GoodNodesToolbar, type ToolbarTool, type ToolbarShape } from "../toolbar/GoodNodesToolbar";
+import { pointInPolygon } from "../ink/lasso";
+import { rememberToolColor, toolColors } from "../settings";
+import { recognizeShape, type RecognizedShape } from "../ink/shapes";
+
+interface PenChoice {
+	color: string;
+	width: number;
+}
+
+interface TextChoice {
+	color: string;
+	size: number;
+	font: number;
+	align: "left" | "center" | "right";
+}
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
@@ -97,12 +111,25 @@ export class CanvasView extends TextFileView {
 	private unsubs: (() => void)[] = [];
 	private mountId = 0;
 	private fileCount = 0;
-	private penPopover: PenPopover | null = null;
-	private textPopover: TextPopover | null = null;
 	private activeTool = "";
 	private savePenTimer = 0;
 	private textDrag: { id: number; start: { x: number; y: number }; current: { x: number; y: number } } | null = null;
 	private textPreview: HTMLElement | null = null;
+	private goodnodesToolbar: GoodNodesToolbar | null = null;
+	private toolbarTool: ToolbarTool = "pen";
+	private selectedShape: ToolbarShape = "line";
+	private strokeBaseline = new Set<string>();
+	private lassoDrag: { id: number; points: [number, number][]; overlay: SVGSVGElement; path: SVGPathElement } | null =
+		null;
+	private holdDrag: {
+		id: number;
+		points: [number, number][];
+		overlay: SVGSVGElement;
+		path: SVGPathElement;
+		shape: RecognizedShape | null;
+		timer: number | null;
+	} | null = null;
+	private heldShape: RecognizedShape | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -233,50 +260,97 @@ export class CanvasView extends TextFileView {
 		const host = this.contentEl.createDiv({ cls: "goodnodes-canvas-host" });
 		host.dataset.tool = "freedraw";
 		this.unsubs.push(debrandExcalidraw(host, () => new GoodNodesHelpModal(this.app).open()));
-		this.penPopover = new PenPopover(
-			host,
-			() => ({ color: this.plugin.settings.canvasPenColor, width: this.plugin.settings.canvasPenWidth }),
-			(choice) => this.setPen(choice),
-			() => this.fingersDraw(),
-			(on) => this.setFingerDrawing(on),
-		);
-		this.textPopover = new TextPopover(
-			host,
-			() => ({
-				color: this.plugin.settings.canvasTextColor,
-				size: this.plugin.settings.canvasTextSize,
-				font: this.plugin.settings.canvasTextFont,
-				align: this.plugin.settings.canvasTextAlign,
-			}),
-			(choice) => this.setText(choice),
-		);
-		// Tapping the pen while it is already the active tool opens the pen popover.
-		// Capture phase: runs before Excalidraw handles the click (and re-selects the tool).
-		host.addEventListener(
-			"click",
-			(e) => {
-				const button = (e.target as Element | null)?.closest?.<HTMLElement>('[data-testid="toolbar-freedraw"]');
-				if (!button) return;
-				const wasActive = this.api?.getAppState().activeTool.type === "freedraw";
-				if (wasActive) setTimeout(() => this.penPopover?.toggle(button), 0);
+		const toolbarIsland = host.createDiv({ cls: "goodnodes-canvas-toolbar" });
+		this.goodnodesToolbar = new GoodNodesToolbar(toolbarIsland, {
+			state: () => {
+				const s = this.plugin.settings;
+				const tool = this.toolbarTool;
+				const key =
+					tool === "highlighter" ? "highlighter" : tool === "text" || tool === "shapes" ? tool : "pen";
+				return {
+					active: tool,
+					color:
+						key === "highlighter"
+							? s.highlighterColor
+							: key === "text"
+								? s.canvasTextColor
+								: s.canvasPenColor,
+					colors: toolColors(s, key),
+					width: key === "highlighter" ? s.highlighterWidth : s.canvasPenWidth,
+					widths: key === "highlighter" ? s.highlighterWidths : s.penWidths,
+					penType: s.penType,
+					drawAndHold: s.drawAndHold,
+					eraserMode: s.eraserMode,
+					eraserSize: s.eraserSize,
+					eraserHighlighterOnly: s.eraserHighlighterOnly,
+					textSize: s.canvasTextSize,
+					textFont: s.canvasTextFont,
+					textAlign: s.canvasTextAlign,
+					shape: this.selectedShape,
+					canUndo: undefined,
+					canRedo: undefined,
+				};
 			},
-			true,
-		);
-		host.addEventListener(
-			"click",
-			(e) => {
-				const button = (e.target as Element | null)?.closest?.<HTMLElement>('[data-testid="toolbar-text"]');
-				if (!button) return;
-				if (this.api?.getAppState().activeTool.type === "text")
-					setTimeout(() => this.textPopover?.toggle(button), 0);
+			supports: () => true,
+			select: (tool) => this.selectToolbarTool(tool),
+			color: (tool, color, index) => {
+				const s = this.plugin.settings;
+				rememberToolColor(s, tool, index, color);
+				if (tool === "highlighter") s.highlighterColor = color;
+				else if (tool === "text") s.canvasTextColor = color;
+				else s.canvasPenColor = color;
+				if (tool === "text")
+					this.setText({ color, size: s.canvasTextSize, font: s.canvasTextFont, align: s.canvasTextAlign });
+				else if (tool === "highlighter") this.applyHighlighter();
+				else this.setPen({ color, width: s.canvasPenWidth });
+				this.saveToolbarSettings();
 			},
-			true,
-		);
+			width: (tool, width, index) => {
+				const s = this.plugin.settings;
+				if (tool === "highlighter") {
+					s.highlighterWidth = width;
+					s.highlighterWidths[index] = width;
+					this.applyHighlighter();
+				} else {
+					s.canvasPenWidth = width;
+					s.penWidths[index] = width;
+					this.applyPen();
+				}
+				this.saveToolbarSettings();
+			},
+			setting: (key, value) => {
+				const s = this.plugin.settings;
+				if (key === "penType") s.penType = value as any;
+				if (key === "drawAndHold") s.drawAndHold = Boolean(value);
+				if (key === "eraserMode") s.eraserMode = value as any;
+				if (key === "eraserHighlighterOnly") s.eraserHighlighterOnly = Boolean(value);
+				if (key === "eraserSize") s.eraserSize = Number(value);
+				if (key === "textSize") s.canvasTextSize = Number(value);
+				if (key === "textFont") s.canvasTextFont = Number(value);
+				if (key === "textAlign") s.canvasTextAlign = value as any;
+				if (key === "shape") {
+					this.selectedShape = value as ToolbarShape;
+					this.api?.setActiveTool({ type: value as any });
+				}
+				if (this.toolbarTool === "text") this.applyText();
+				this.saveToolbarSettings();
+				this.goodnodesToolbar?.refresh();
+			},
+			undo: () => this.canvasHistory("undo"),
+			redo: () => this.canvasHistory("redo"),
+			more: (event) => this.showCanvasMore(event),
+			eraserOptions: false,
+			eraserHighlighterOnly: false,
+		});
 		this.hostEl = host;
 		host.addEventListener("pointerdown", this.onTextPointerDown, true);
+		host.addEventListener("pointerdown", this.onCanvasPointerDown, true);
 		host.addEventListener("pointermove", this.onTextPointerMove, true);
+		host.addEventListener("pointermove", this.onCanvasPointerMove, true);
 		host.addEventListener("pointerup", this.onTextPointerUp, true);
+		host.addEventListener("pointerup", this.onCanvasPointerUp, true);
 		host.addEventListener("pointercancel", this.onTextPointerUp, true);
+		host.addEventListener("pointercancel", this.onCanvasPointerUp, true);
 		this.bg = new BackgroundLayer(host, this.background, this.isDark());
 		this.bg.setViewport(this.viewport);
 		const excalidrawEl = host.createDiv({ cls: "goodnodes-canvas-excalidraw" });
@@ -330,12 +404,10 @@ export class CanvasView extends TextFileView {
 	}
 
 	private unmount(): void {
-		this.penPopover?.close();
-		this.textPopover?.close();
-		this.textPopover = null;
+		this.goodnodesToolbar?.destroy();
+		this.goodnodesToolbar = null;
 		this.textPreview?.remove();
 		this.textPreview = null;
-		this.penPopover = null;
 		for (const u of this.unsubs) u();
 		this.unsubs = [];
 		this.gestures?.destroy();
@@ -373,6 +445,7 @@ export class CanvasView extends TextFileView {
 				// Let Excalidraw finalize the element and record its history entry first.
 				setTimeout(() => {
 					if (this.api !== api) return;
+					this.finishCanvasStroke(api);
 					const s = this.plugin.settings;
 					try {
 						handleFinishedStroke(api, {
@@ -405,10 +478,97 @@ export class CanvasView extends TextFileView {
 		if (tool === this.activeTool) return;
 		this.activeTool = tool;
 		if (this.hostEl) this.hostEl.dataset.tool = tool;
-		if (tool !== "freedraw") this.penPopover?.close();
-		if (tool !== "text") this.textPopover?.close();
-		if (tool === "freedraw") this.applyPen();
+		if (tool === "freedraw") this.toolbarTool === "highlighter" ? this.applyHighlighter() : this.applyPen();
 		if (tool === "text") this.applyText();
+		this.goodnodesToolbar?.refresh();
+	}
+
+	private selectToolbarTool(tool: ToolbarTool): void {
+		this.toolbarTool = tool;
+		if (tool === "lasso") this.api?.setActiveTool({ type: "selection" });
+		else if (tool === "pen") {
+			this.api?.setActiveTool({ type: "freedraw" });
+			this.applyPen();
+		} else if (tool === "highlighter") {
+			this.api?.setActiveTool({ type: "freedraw" });
+			this.applyHighlighter();
+		} else if (tool === "eraser") this.api?.setActiveTool({ type: "eraser" });
+		else if (tool === "text") {
+			this.api?.setActiveTool({ type: "text" });
+			this.applyText();
+		} else if (tool === "image") this.api?.setActiveTool({ type: "image" });
+		else this.api?.setActiveTool({ type: this.selectedShape as any });
+		this.goodnodesToolbar?.refresh();
+	}
+
+	private applyHighlighter(): void {
+		const s = this.plugin.settings;
+		this.api?.updateScene({
+			appState: {
+				currentItemStrokeColor: s.highlighterColor,
+				currentItemStrokeWidth: s.highlighterWidth * 4,
+				currentItemOpacity: 35,
+			},
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
+	}
+
+	private canvasHistory(action: "undo" | "redo"): void {
+		const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+		this.hostEl?.querySelector(".excalidraw")?.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "z",
+				ctrlKey: !mac,
+				metaKey: mac,
+				shiftKey: action === "redo",
+				bubbles: true,
+			}),
+		);
+	}
+
+	private showCanvasMore(event: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle("Insert PDF…")
+				.setIcon("file-plus")
+				.onClick(() => this.api && void insertPdfIntoCanvas(this.app, this.api)),
+		);
+		menu.addItem((item) =>
+			item.setTitle("Paper: Blank").onClick(() => this.setBackground({ ...this.background, kind: "blank" })),
+		);
+		menu.addItem((item) =>
+			item.setTitle("Paper: Grid").onClick(() => this.setBackground({ ...this.background, kind: "grid" })),
+		);
+		menu.addItem((item) =>
+			item.setTitle("Paper: Dots").onClick(() => this.setBackground({ ...this.background, kind: "dots" })),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Draw with finger")
+				.setIcon("pointer")
+				.setChecked(this.fingersDraw())
+				.onClick(() => this.setFingerDrawing(!this.fingersDraw())),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Library")
+				.setIcon("library")
+				.onClick(() => (this.api as any)?.toggleSidebar?.({ name: "default" })),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("GoodNodes help")
+				.setIcon("help")
+				.onClick(() => new GoodNodesHelpModal(this.app).open()),
+		);
+		menu.showAtMouseEvent(event);
+	}
+
+	private saveToolbarSettings(): void {
+		window.clearTimeout(this.savePenTimer);
+		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
+		this.goodnodesToolbar?.refresh();
 	}
 
 	private fingersDraw(): boolean {
@@ -476,6 +636,198 @@ export class CanvasView extends TextFileView {
 		}
 		window.clearTimeout(this.savePenTimer);
 		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
+	}
+
+	private onCanvasPointerDown = (event: PointerEvent): void => {
+		if (this.toolbarTool !== "lasso") {
+			if (this.api?.getAppState().activeTool.type === "freedraw")
+				this.strokeBaseline = new Set(this.api.getSceneElements().map((element) => element.id));
+			if (
+				this.toolbarTool === "pen" &&
+				this.plugin.settings.drawAndHold &&
+				this.api?.getAppState().activeTool.type === "freedraw" &&
+				event.target instanceof HTMLCanvasElement &&
+				(event.pointerType !== "touch" || this.fingersDraw())
+			) {
+				const point = this.scenePoint(event.clientX, event.clientY);
+				const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+				overlay.classList.add("goodnodes-lasso-overlay", "is-hold-preview");
+				const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+				overlay.append(path);
+				this.hostEl?.append(overlay);
+				const hold = (this.holdDrag = {
+					id: event.pointerId,
+					points: [[point.x, point.y]],
+					overlay,
+					path,
+					shape: null,
+					timer: null,
+				});
+				this.scheduleHoldRecognition(hold);
+			}
+			return;
+		}
+		if (!this.api) return;
+		if (event.pointerType === "touch" && !this.fingersDraw()) return;
+		if (event.pointerType !== "pen" && event.pointerType !== "mouse" && event.pointerType !== "touch") return;
+		if (!(event.target instanceof HTMLCanvasElement)) return;
+		const state = this.api.getAppState();
+		const point = this.scenePoint(event.clientX, event.clientY);
+		const selected = this.api.getSceneElements().filter((element) => state.selectedElementIds[element.id]);
+		// Existing selection gestures remain Excalidraw's so its handles keep working.
+		if (
+			selected.some(
+				(element) =>
+					point.x >= element.x - 12 &&
+					point.x <= element.x + element.width + 12 &&
+					point.y >= element.y - 12 &&
+					point.y <= element.y + element.height + 12,
+			)
+		)
+			return;
+		event.preventDefault();
+		event.stopPropagation();
+		const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		overlay.classList.add("goodnodes-lasso-overlay");
+		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		overlay.append(path);
+		this.hostEl?.append(overlay);
+		this.lassoDrag = { id: event.pointerId, points: [[point.x, point.y]], overlay, path };
+	};
+
+	private onCanvasPointerMove = (event: PointerEvent): void => {
+		const hold = this.holdDrag;
+		if (hold?.id === event.pointerId) {
+			const p = this.scenePoint(event.clientX, event.clientY);
+			const last = hold.points[hold.points.length - 1];
+			if (Math.hypot(p.x - last[0], p.y - last[1]) * this.viewport.zoom > 2) {
+				hold.points.push([p.x, p.y]);
+				hold.shape = null;
+				hold.path.removeAttribute("d");
+				this.scheduleHoldRecognition(hold);
+			}
+			return;
+		}
+		const drag = this.lassoDrag;
+		if (!drag || drag.id !== event.pointerId) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const p = this.scenePoint(event.clientX, event.clientY);
+		const last = drag.points[drag.points.length - 1];
+		if (Math.hypot(p.x - last[0], p.y - last[1]) * this.viewport.zoom < 3) return;
+		drag.points.push([p.x, p.y]);
+		const toScreen = ([x, y]: [number, number]) =>
+			`${(x + this.viewport.scrollX) * this.viewport.zoom} ${(y + this.viewport.scrollY) * this.viewport.zoom}`;
+		drag.path.setAttribute("d", `M ${drag.points.map(toScreen).join(" L ")} Z`);
+	};
+
+	private onCanvasPointerUp = (event: PointerEvent): void => {
+		const hold = this.holdDrag;
+		if (hold?.id === event.pointerId) {
+			if (hold.timer !== null) window.clearTimeout(hold.timer);
+			this.heldShape = hold.shape;
+			hold.overlay.remove();
+			this.holdDrag = null;
+			return;
+		}
+		const drag = this.lassoDrag;
+		if (!drag || drag.id !== event.pointerId) return;
+		event.preventDefault();
+		event.stopPropagation();
+		drag.overlay.remove();
+		this.lassoDrag = null;
+		const selectedElementIds: Record<string, true> = {};
+		for (const element of this.api?.getSceneElements() ?? []) {
+			const center: [number, number] = [element.x + element.width / 2, element.y + element.height / 2];
+			if (pointInPolygon(center, drag.points)) selectedElementIds[element.id] = true;
+		}
+		this.api?.updateScene({
+			appState: {
+				selectedElementIds,
+				activeTool: { type: "selection", customType: null, locked: false, lastActiveTool: null } as any,
+			},
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
+		this.api?.setActiveTool({ type: "selection" });
+	};
+
+	private scheduleHoldRecognition(hold: NonNullable<CanvasView["holdDrag"]>): void {
+		if (hold.timer !== null) window.clearTimeout(hold.timer);
+		hold.timer = window.setTimeout(() => {
+			hold.timer = null;
+			hold.shape = recognizeShape(hold.points);
+			if (!hold.shape) return;
+			const toScreen = ([x, y]: [number, number]) =>
+				`${(x + this.viewport.scrollX) * this.viewport.zoom} ${(y + this.viewport.scrollY) * this.viewport.zoom}`;
+			hold.path.setAttribute(
+				"d",
+				`M ${hold.shape.points.map(toScreen).join(" L ")}${hold.shape.kind === "line" ? "" : " Z"}`,
+			);
+		}, 600);
+	}
+
+	private finishCanvasStroke(api: ExcalidrawImperativeAPI): void {
+		const created = api
+			.getSceneElementsIncludingDeleted()
+			.filter((element) => !this.strokeBaseline.has(element.id) && element.type === "freedraw");
+		this.strokeBaseline.clear();
+		const element = created[created.length - 1] as Extract<ExcalidrawElement, { type: "freedraw" }> | undefined;
+		if (!element) return;
+		const s = this.plugin.settings;
+		if (this.heldShape && this.toolbarTool === "pen") {
+			const shape = this.heldShape;
+			this.heldShape = null;
+			// The stroke stays the same freedraw element, just with the ideal shape's points
+			// (like the PDF notebook): Excalidraw's history then still holds exactly one
+			// step for it, so Undo removes the shape. Swapping in a new element outside the
+			// history made Undo skip it and remove the previous stroke instead.
+			const xs = shape.points.map((p) => p[0]),
+				ys = shape.points.map((p) => p[1]);
+			const x = Math.min(...xs),
+				y = Math.min(...ys);
+			const snapped = {
+				...element,
+				x,
+				y,
+				width: Math.max(1, Math.max(...xs) - x),
+				height: Math.max(1, Math.max(...ys) - y),
+				points: shape.points.map(([px, py]) => [px - x, py - y] as [number, number]),
+				pressures: shape.points.map(() => 0.5),
+				simulatePressure: false,
+				version: element.version + 1,
+				versionNonce: Math.floor(Math.random() * 2 ** 31),
+			} as unknown as ExcalidrawElement;
+			api.updateScene({
+				elements: api
+					.getSceneElementsIncludingDeleted()
+					.map((item) => (item.id === element.id ? snapped : item)),
+				captureUpdate: CaptureUpdateAction.NEVER,
+			});
+			return;
+		}
+		let updated: ExcalidrawElement = element;
+		if (this.toolbarTool === "highlighter")
+			updated = {
+				...element,
+				customData: { ...(element.customData ?? {}), goodnodesTool: "highlighter" },
+				simulatePressure: false,
+				pressures: element.points.map(() => 0.5),
+			} as ExcalidrawElement;
+		else if (this.toolbarTool === "pen" && s.penType === "ball")
+			updated = { ...element, simulatePressure: false, pressures: element.points.map(() => 0.5) };
+		else if (this.toolbarTool === "pen" && s.penType === "brush")
+			updated = {
+				...element,
+				strokeWidth: element.strokeWidth * 1.2,
+				pressures: element.pressures.map((p) => Math.pow(Math.max(0, p), 0.6)),
+			};
+		if (updated !== element)
+			api.updateScene({
+				elements: api
+					.getSceneElementsIncludingDeleted()
+					.map((item) => (item.id === element.id ? updated : item)),
+				captureUpdate: CaptureUpdateAction.NEVER,
+			});
 	}
 
 	// Dragging with the text tool sizes the text box: the rectangle's height sets the font
@@ -575,7 +927,12 @@ export class CanvasView extends TextFileView {
 	private applyPen(): void {
 		const s = this.plugin.settings;
 		const st = this.api?.getAppState();
-		if (!st || (st.currentItemStrokeColor === s.canvasPenColor && st.currentItemStrokeWidth === s.canvasPenWidth))
+		if (
+			!st ||
+			(st.currentItemStrokeColor === s.canvasPenColor &&
+				st.currentItemStrokeWidth === s.canvasPenWidth &&
+				st.currentItemOpacity === 100)
+		)
 			return;
 		this.api?.updateScene({
 			appState: {

@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type GoodNodesPlugin from "./main";
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
+import type { PenType } from "./ink/penStyle";
 
 export interface GoodNodesSettings {
 	// Last used tool settings, chosen in the pen popover (tap the active pen) and
@@ -9,11 +10,19 @@ export interface GoodNodesSettings {
 	penColor: string;
 	/** PDF pen width in page points. */
 	penWidth: number;
+	penWidths: number[];
+	/** The two user-set colors per tool, after the three basic ones (GoodNotes-style). */
+	customColors: Record<ColorKey, string[]>;
 	highlighterColor: string;
 	/** PDF highlighter width, in stroke.width units (highlighters render 5× wider than pens). */
 	highlighterWidth: number;
+	highlighterWidths: number[];
 	/** PDF eraser radius in CSS px. */
 	eraserSize: number;
+	penType: PenType;
+	eraserMode: "precise" | "stroke";
+	eraserHighlighterOnly: boolean;
+	drawAndHold: boolean;
 	/** Canvas (Excalidraw) freedraw color and width. */
 	canvasPenColor: string;
 	canvasPenWidth: number;
@@ -46,9 +55,22 @@ export interface GoodNodesSettings {
 export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	penColor: "#1e1e1e",
 	penWidth: 2,
+	penWidths: [1, 2, 4],
+	customColors: {
+		pen: ["#2f9e44", "#9c36b5"],
+		highlighter: ["#faa2c1", "#ffa94d"],
+		text: ["#2f9e44", "#9c36b5"],
+		shapes: ["#2f9e44", "#9c36b5"],
+	},
+
 	highlighterColor: "#ffd43b",
 	highlighterWidth: 2.4,
+	highlighterWidths: [1.6, 2.4, 3.6],
 	eraserSize: 10,
+	penType: "fountain",
+	eraserMode: "stroke",
+	eraserHighlighterOnly: false,
+	drawAndHold: true,
 	canvasPenColor: "#1e1e1e",
 	canvasPenWidth: 2,
 	canvasFingerDrawing: "auto",
@@ -192,4 +214,30 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 				}),
 			);
 	}
+}
+
+export type ColorKey = "pen" | "highlighter" | "text" | "shapes";
+
+/** Three fixed colors per tool; two more are the user's own (`customColors`). */
+export const BASIC_COLORS: Record<ColorKey, string[]> = {
+	pen: ["#1e1e1e", "#1971c2", "#e03131"],
+	highlighter: ["#ffd43b", "#69db7c", "#74c0fc"],
+	text: ["#1e1e1e", "#1971c2", "#e03131"],
+	shapes: ["#1e1e1e", "#1971c2", "#e03131"],
+};
+
+export function colorKey(tool: string): ColorKey {
+	return tool === "highlighter" || tool === "text" || tool === "shapes" ? tool : "pen";
+}
+
+/** The five colors the toolbar shows for a tool: 3 basic, then the 2 custom ones. */
+export function toolColors(settings: GoodNodesSettings, tool: string): string[] {
+	const key = colorKey(tool);
+	return [...BASIC_COLORS[key], ...settings.customColors[key]];
+}
+
+/** A color picked in slot `index` (0–4); slots 3 and 4 are the custom ones and remember it. */
+export function rememberToolColor(settings: GoodNodesSettings, tool: string, index: number, color: string): void {
+	if (index >= BASIC_COLORS.pen.length)
+		settings.customColors[colorKey(tool)][index - BASIC_COLORS.pen.length] = color;
 }

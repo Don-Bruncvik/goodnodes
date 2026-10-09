@@ -15,6 +15,7 @@ export function parseSidecar(text: string, pageCount: number): PdfSidecar | null
 				tool: stroke.tool,
 				color: stroke.color,
 				width: stroke.width,
+				...(stroke.pen ? { pen: stroke.pen } : {}),
 				points: stroke.points.map(
 					(point) => [round(point[0]), round(point[1]), clampPressure(point[2])] as [number, number, number],
 				),
@@ -91,6 +92,7 @@ function isStroke(value: unknown): value is InkStroke {
 	return (
 		typeof stroke.id === "string" &&
 		(stroke.tool === "pen" || stroke.tool === "highlighter") &&
+		(stroke.pen === undefined || stroke.pen === "fountain" || stroke.pen === "ball" || stroke.pen === "brush") &&
 		typeof stroke.color === "string" &&
 		/^#[\da-f]{6}$/i.test(stroke.color) &&
 		Number.isFinite(stroke.width) &&

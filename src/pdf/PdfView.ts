@@ -12,13 +12,17 @@ import {
 } from "obsidian";
 import { PDFDocument } from "pdf-lib";
 import { getStroke } from "perfect-freehand";
+import { strokeOptions } from "../ink/penStyle";
+import type { PenType } from "../ink/penStyle";
+import { recognizeShape } from "../ink/shapes";
+import { strokesInLasso, transformStrokes } from "../ink/lasso";
 import { findScratchedStrokes } from "../scratch/detect";
 import type GoodNodesPlugin from "../main";
 import { debug } from "../debug";
 import { createAnnotatedPdf } from "./export";
 import { openPdf } from "./pdfjs";
 import { displayedToUnrotated, unrotatedToDisplayed } from "./coordinates";
-import { findEraserHits } from "./eraser";
+import { findEraserHits, splitStrokesByEraser } from "./eraser";
 import { PdfHistory } from "./history";
 import type { InkPoint, InkStroke, InkTool, PdfSidecar } from "./model";
 import { newStrokeId } from "./model";
@@ -27,6 +31,8 @@ import { deleteSidecarPage, insertSidecarPages } from "./page-ops";
 import { drawPaperTemplate } from "../notebook/paper";
 import type { NotebookMeta } from "../notebook";
 import { pickFiles } from "../files";
+import { GoodNodesToolbar, type ToolbarTool } from "../toolbar/GoodNodesToolbar";
+import { rememberToolColor, toolColors } from "../settings";
 import "./pdf.css";
 
 export const PDF_VIEW_TYPE = "goodnodes-pdf";
@@ -72,7 +78,7 @@ type PageSlot = {
 	/** Drawn at an old zoom: stays on screen (scaled) until the sharp render replaces it. */
 	stale?: boolean;
 };
-type Tool = InkTool | "eraser";
+type Tool = InkTool | "eraser" | "lasso";
 type ZoomAnchor = { page: number; x: number; y: number };
 type Gesture = {
 	distance: number;
@@ -84,7 +90,7 @@ type Gesture = {
 	anchor: ZoomAnchor;
 	visualScale: number;
 };
-type SessionTool = { tool: Tool; color: string; width: number };
+type SessionTool = { tool: Tool; color: string; width: number; pen: PenType };
 type SidebarTab = "pages" | "outline" | "bookmarks";
 const PEN_COLORS = [
 	"#1e1e1e",
@@ -110,7 +116,7 @@ export class PdfNotebookView extends FileView {
 	private scroller: HTMLElement;
 	private pagesEl: HTMLElement;
 	private toolbar: HTMLElement;
-	private historyToolbar!: HTMLElement;
+	private goodnodesToolbar: GoodNodesToolbar | null = null;
 	private indicator: HTMLElement;
 	private sidebar: HTMLElement | null = null;
 	private sidebarContent: HTMLElement | null = null;
@@ -118,7 +124,6 @@ export class PdfNotebookView extends FileView {
 	/** Saved sidebar state: a tab, "closed" (the user closed it), or null (never set). */
 	private restoredSidebar: SidebarTab | "closed" | null = null;
 	private sidebarClosedByUser = false;
-	private popover: HTMLElement | null = null;
 	private settingsTimer: number | null = null;
 	private bookmarks = new Set<number>();
 	private scrubber: HTMLElement;
@@ -146,6 +151,29 @@ export class PdfNotebookView extends FileView {
 	private toolState: SessionTool;
 	/** The stroke in progress belongs to exactly one pen/mouse pointer. */
 	private activeStroke: { pointerId: number; page: number; points: InkPoint[]; tool: Tool } | null = null;
+	private holdTimer: number | null = null;
+	private snapped = false;
+	/** Lasso selection; `display` is its box in displayed (rotated) page units. */
+	private selected: {
+		page: number;
+		strokes: InkStroke[];
+		box: HTMLElement;
+		display: { x: number; y: number; width: number; height: number };
+	} | null = null;
+	/** Dragging the selection (move) or one of its corner handles (resize). */
+	private movingSelection: {
+		pointerId: number;
+		page: number;
+		mode: "move" | "resize";
+		old: InkStroke[];
+		/** The page's other strokes, unchanged during the drag. */
+		rest: InkStroke[];
+		start: [number, number];
+		/** Resize: the opposite corner stays put (unrotated page units). */
+		anchor: [number, number];
+		current: InkStroke[];
+	} | null = null;
+	private static clipboard: InkStroke[] = [];
 	private pointers = new Map<number, PointerEvent>();
 	private pinch: Gesture | null = null;
 	private penUntil = 0;
@@ -203,6 +231,7 @@ export class PdfNotebookView extends FileView {
 			tool: sessionTool,
 			color: plugin.settings.penColor,
 			width: plugin.settings.penWidth,
+			pen: plugin.settings.penType ?? "fountain",
 		};
 		this.contentEl.addClass("goodnodes-pdf-root");
 		this.contentEl.toggleClass("is-horizontal", this.horizontal);
@@ -352,42 +381,76 @@ export class PdfNotebookView extends FileView {
 
 	async onClose(): Promise<void> {
 		await this.flushSave();
+		this.goodnodesToolbar?.destroy();
+		this.goodnodesToolbar = null;
 	}
 
 	private buildToolbar(): void {
-		this.iconButton(this.toolbar, "panel-left", "Pages sidebar", () => this.toggleSidebar());
-		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
-		this.toolButton("pen", "pen-line", "Pen");
-		this.toolButton("highlighter", "highlighter", "Highlighter");
-		this.toolButton("eraser", "eraser", "Eraser");
-		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
-		const bookmark = this.iconButton(this.toolbar, "bookmark", "Bookmark page", () =>
-			this.toggleBookmark(this.currentPage),
-		);
-		bookmark.dataset.action = "bookmark";
-		this.iconButton(this.toolbar, "more-horizontal", "More", (event?: MouseEvent) => this.showMore(event));
-		// Undo/redo live in the toolbar (like GoodNotes): a separate floating box covered the page.
-		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
-		this.historyToolbar = this.toolbar.createDiv({ cls: "goodnodes-pdf-history-group" });
-		this.iconButton(this.historyToolbar, "undo-2", "Undo", () => this.undo());
-		this.iconButton(this.historyToolbar, "redo-2", "Redo", () => this.redo());
-		this.updateToolbar();
-	}
-
-	private toolButton(tool: Tool, icon: string, label: string): void {
-		const button = this.toolbar.createEl("button", {
-			cls: "goodnodes-pdf-tool",
-			attr: { "aria-label": label, title: label },
+		this.goodnodesToolbar = new GoodNodesToolbar(this.toolbar, {
+			state: () => {
+				const tool = this.toolState.tool as ToolbarTool;
+				return {
+					active: tool,
+					color: this.toolState.color,
+					colors: toolColors(this.plugin.settings, tool),
+					width: this.toolState.width,
+					widths:
+						tool === "highlighter"
+							? this.plugin.settings.highlighterWidths
+							: this.plugin.settings.penWidths,
+					penType: this.plugin.settings.penType,
+					drawAndHold: this.plugin.settings.drawAndHold,
+					eraserMode: this.plugin.settings.eraserMode,
+					eraserSize: this.plugin.settings.eraserSize,
+					eraserHighlighterOnly: this.plugin.settings.eraserHighlighterOnly,
+					textSize: 20,
+					textFont: 5,
+					textAlign: "left",
+					shape: "line",
+					canUndo: this.history.canUndo,
+					canRedo: this.history.canRedo,
+				};
+			},
+			supports: (tool) => tool !== "text" && tool !== "shapes" && tool !== "image",
+			leading: (parent) => {
+				const b = this.iconButton(
+					parent,
+					"panel-left",
+					"Pages sidebar",
+					() => this.toggleSidebar(),
+					"goodnodes-toolbar-leading",
+				);
+				b.toggleClass("is-active", !!this.sidebar);
+			},
+			select: (tool) => this.selectTool(tool as Tool),
+			color: (tool, value, index) => {
+				rememberToolColor(this.plugin.settings, tool, index, value);
+				this.applyToolColor(tool === "highlighter" ? "highlighter" : "pen", value);
+				this.scheduleSettingsSave();
+			},
+			width: (tool, value, index) => {
+				if (tool === "highlighter") this.plugin.settings.highlighterWidths[index] = value;
+				else this.plugin.settings.penWidths[index] = value;
+				this.applyToolWidth(tool as Tool, value);
+				this.goodnodesToolbar?.refresh();
+			},
+			setting: (key, value) => {
+				if (key === "penType") {
+					this.plugin.settings.penType = value as any;
+					this.toolState.pen = value as PenType;
+				}
+				if (key === "drawAndHold") this.plugin.settings.drawAndHold = Boolean(value);
+				if (key === "eraserMode") this.plugin.settings.eraserMode = value as any;
+				if (key === "eraserHighlighterOnly") this.plugin.settings.eraserHighlighterOnly = Boolean(value);
+				if (key === "eraserSize") this.plugin.settings.eraserSize = Number(value);
+				this.scheduleSettingsSave();
+				this.goodnodesToolbar?.refresh();
+			},
+			undo: () => this.undo(),
+			redo: () => this.redo(),
+			more: (event) => this.showMore(event),
 		});
-		setIcon(button, icon);
-		button.dataset.tool = tool;
-		button.onclick = () => {
-			if (this.toolState.tool === tool) this.openToolPopover(button, tool);
-			else {
-				this.closePopover();
-				this.selectTool(tool);
-			}
-		};
+		this.updateToolbar();
 	}
 
 	private iconButton(
@@ -404,27 +467,11 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private updateToolbar(): void {
-		this.toolbar
-			.querySelectorAll<HTMLElement>("[data-tool]")
-			.forEach((button) => button.toggleClass("is-active", button.dataset.tool === this.toolState.tool));
-		for (const tool of ["pen", "highlighter"] as const) {
-			const button = this.toolbar.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
-			if (!button) continue;
-			const color = tool === "pen" ? this.plugin.settings.penColor : this.plugin.settings.highlighterColor;
-			button.style.setProperty("--goodnodes-tool-color", color);
-			button.toggleClass("has-color", true);
-		}
-		const bookmark = this.toolbar.querySelector<HTMLElement>('[data-action="bookmark"]');
-		if (bookmark) {
-			const active = this.bookmarks.has(this.currentPage);
-			bookmark.toggleClass("is-bookmarked", active);
-			bookmark.setAttribute("aria-label", active ? "Remove bookmark" : "Bookmark page");
-			bookmark.setAttribute("title", active ? "Remove bookmark" : "Bookmark page");
-			setIcon(bookmark, active ? "bookmark-check" : "bookmark");
-		}
+		this.goodnodesToolbar?.refresh();
 	}
 
 	private selectTool(tool: Tool): void {
+		this.clearSelection();
 		sessionTool = tool;
 		this.toolState.tool = tool;
 		this.toolState.color =
@@ -436,6 +483,12 @@ export class PdfNotebookView extends FileView {
 
 	private showMore(event?: MouseEvent): void {
 		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle(this.bookmarks.has(this.currentPage) ? "Remove bookmark" : "Bookmark page")
+				.setIcon("bookmark")
+				.onClick(() => this.toggleBookmark(this.currentPage)),
+		);
 		menu.addItem((item) =>
 			item
 				.setTitle("Zoom in")
@@ -498,80 +551,6 @@ export class PdfNotebookView extends FileView {
 			});
 	}
 
-	private openToolPopover(anchor: HTMLElement, tool: Tool): void {
-		this.closePopover();
-		const popover = this.contentEl.createDiv({ cls: `goodnodes-pdf-popover goodnodes-pdf-popover-${tool}` });
-		this.popover = popover;
-		const settings = this.plugin.settings;
-		const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
-		if (tool !== "eraser") {
-			const row = popover.createDiv({ cls: "goodnodes-pdf-popover-colors" });
-			for (const color of [...colors, "custom"]) {
-				const current = tool === "highlighter" ? settings.highlighterColor : settings.penColor;
-				const swatch = row.createEl("button", {
-					cls: "goodnodes-pdf-swatch",
-					attr: { title: color === "custom" ? "Custom color" : color },
-				});
-				if (color === "custom") {
-					swatch.addClass("is-custom");
-					const input = swatch.createEl("input", { attr: { type: "color", value: current } });
-					input.oninput = () => this.applyToolColor(tool, input.value);
-				} else swatch.style.setProperty("--goodnodes-swatch", color);
-				swatch.toggleClass("is-active", color === current.toLowerCase());
-				if (color !== "custom") swatch.onclick = () => this.applyToolColor(tool, color);
-			}
-		}
-		const widths =
-			tool === "highlighter" ? [1.6, 2.4, 3.6] : tool === "eraser" ? [6, 10, 16] : [0.8, 1.4, 2, 3, 4.5];
-		const widthRow = popover.createDiv({ cls: "goodnodes-pdf-popover-widths" });
-		const currentWidth =
-			tool === "eraser"
-				? settings.eraserSize
-				: tool === "highlighter"
-					? settings.highlighterWidth
-					: settings.penWidth;
-		for (const width of widths) {
-			const button = widthRow.createEl("button", {
-				attr: { title: tool === "eraser" ? `${width}px radius` : `${width} pt` },
-			});
-			button.toggleClass("is-active", width === currentWidth);
-			const sample = button.createSpan({ cls: "goodnodes-pdf-width-sample" });
-			sample.style.setProperty(
-				"--goodnodes-sample-width",
-				// 3px + 3× width: the thinnest pen was an invisible 1.6px dot, and every width
-				// must still look different.
-				`${Math.min(18, tool === "eraser" ? width : 3 + width * 3)}px`,
-			);
-			sample.style.setProperty(
-				"--goodnodes-tool-color",
-				tool === "highlighter" ? settings.highlighterColor : settings.penColor,
-			);
-			button.onclick = () => this.applyToolWidth(tool, width);
-		}
-		const rect = anchor.getBoundingClientRect();
-		popover.style.left = `${Math.max(8, Math.min(window.innerWidth - popover.offsetWidth - 8, rect.left + rect.width / 2 - popover.offsetWidth / 2))}px`;
-		popover.style.top = `${Math.max(8, Math.min(window.innerHeight - popover.offsetHeight - 8, rect.bottom + 8))}px`;
-		const outside = (event: PointerEvent) => {
-			if (!popover.contains(event.target as Node) && !anchor.contains(event.target as Node)) this.closePopover();
-		};
-		const escape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") this.closePopover();
-		};
-		window.addEventListener("pointerup", outside, true);
-		window.addEventListener("keydown", escape, true);
-		(popover as any).__cleanup = () => {
-			window.removeEventListener("pointerup", outside, true);
-			window.removeEventListener("keydown", escape, true);
-		};
-	}
-
-	private closePopover(): void {
-		if (!this.popover) return;
-		(this.popover as any).__cleanup?.();
-		this.popover.remove();
-		this.popover = null;
-	}
-
 	private applyToolColor(tool: InkTool, color: string): void {
 		if (tool === "highlighter") {
 			this.plugin.settings.highlighterColor = color;
@@ -579,6 +558,20 @@ export class PdfNotebookView extends FileView {
 		} else {
 			this.plugin.settings.penColor = color;
 			this.toolState.color = color;
+		}
+		if (this.selected) {
+			const { page, strokes } = this.selected,
+				ids = new Set(strokes.map((s) => s.id));
+			const updated = strokes.map((s) => ({ ...s, color }));
+			this.strokes.set(
+				page,
+				(this.strokes.get(page) ?? []).map((s) =>
+					ids.has(s.id) ? updated.find((item) => item.id === s.id)! : s,
+				),
+			);
+			this.history.push({ page, added: updated, removed: strokes });
+			this.clearSelection();
+			this.changed(page);
 		}
 		this.updateToolbar();
 		this.scheduleSettingsSave();
@@ -594,8 +587,7 @@ export class PdfNotebookView extends FileView {
 			this.toolState.width = width;
 		}
 		this.scheduleSettingsSave();
-		const anchor = this.toolbar.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
-		if (anchor) this.openToolPopover(anchor, tool);
+		this.goodnodesToolbar?.refresh();
 	}
 
 	private scheduleSettingsSave(): void {
@@ -837,6 +829,7 @@ export class PdfNotebookView extends FileView {
 			}
 		});
 		const pageChanged = this.currentPage !== current;
+		if (pageChanged) this.clearSelection();
 		if (pageChanged) this.markDirty();
 		this.currentPage = current;
 		this.indicator.setText(`${current + 1} / ${this.slots.length}`);
@@ -1029,10 +1022,14 @@ export class PdfNotebookView extends FileView {
 	private updateScrubber(): void {
 		const max = Math.max(1, this.maxMainScroll());
 		const fraction = this.mainScroll() / max;
-		const available = Math.max(0, this.scrubber.clientHeight - this.scrubberThumb.offsetHeight);
+		// Book mode: the scrubber runs along the bottom, in the direction pages turn.
+		const axis = this.horizontal ? "X" : "Y";
+		const available = this.horizontal
+			? Math.max(0, this.scrubber.clientWidth - this.scrubberThumb.offsetWidth)
+			: Math.max(0, this.scrubber.clientHeight - this.scrubberThumb.offsetHeight);
 		const offset = fraction * available;
-		this.scrubberThumb.style.transform = `translateY(${offset}px)`;
-		this.scrubberBubble.style.transform = `translateY(${offset}px)`;
+		this.scrubberThumb.style.transform = `translate${axis}(${offset}px)`;
+		this.scrubberBubble.style.transform = `translate${axis}(${offset}px)`;
 		const page = this.currentPage + 1;
 		this.scrubberBubble.setText(`Page ${page} / ${this.slots.length}`);
 	}
@@ -1053,14 +1050,14 @@ export class PdfNotebookView extends FileView {
 		this.scrubberDragging = true;
 		this.updateSnapping();
 		this.scrubber.addClass("is-visible");
-		this.scrubberPendingY = event.clientY;
-		this.applyScrubberPosition(event.clientY);
+		this.scrubberPendingY = this.horizontal ? event.clientX : event.clientY;
+		this.applyScrubberPosition(this.scrubberPendingY);
 	}
 
 	private scrubberMove(event: PointerEvent): void {
 		if (!this.scrubberDragging || event.pointerId !== this.scrubberPointer) return;
 		event.preventDefault();
-		this.scrubberPendingY = event.clientY;
+		this.scrubberPendingY = this.horizontal ? event.clientX : event.clientY;
 		if (this.scrubberRaf) return;
 		this.scrubberRaf = requestAnimationFrame(() => {
 			this.scrubberRaf = 0;
@@ -1068,9 +1065,12 @@ export class PdfNotebookView extends FileView {
 		});
 	}
 
-	private applyScrubberPosition(clientY: number): void {
+	/** `position`: clientX in book mode (scrubber along the bottom), clientY when scrolling vertically. */
+	private applyScrubberPosition(position: number): void {
 		const rect = this.scrubber.getBoundingClientRect();
-		const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+		const ratio = this.horizontal
+			? Math.max(0, Math.min(1, (position - rect.left) / rect.width))
+			: Math.max(0, Math.min(1, (position - rect.top) / rect.height));
 		if (this.horizontal) {
 			const index = Math.min(this.slots.length - 1, Math.floor(ratio * this.slots.length));
 			this.centerPage(index);
@@ -1126,6 +1126,7 @@ export class PdfNotebookView extends FileView {
 		}
 		this.updateAddPageTile();
 		this.updatePagePadding();
+		this.positionSelectionBox();
 		this.applyZoomAnchor(anchor, screenX, screenY);
 		if (this.horizontal && this.zoom <= 1.001) {
 			this.centerPage(anchor.page);
@@ -1181,15 +1182,74 @@ export class PdfNotebookView extends FileView {
 
 	private pointerDown(event: PointerEvent): void {
 		debug.pointer("pdf", event);
+		if ((event.target as Element).closest(".goodnodes-pdf-selection-actions, .goodnodes-pdf-paste-bubble")) return;
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
 		// Fingers scroll natively and pinch via TouchEvents (syncPinch); they never draw.
 		if (event.pointerType === "touch") return;
 		this.pointers.set(event.pointerId, event);
 		if (event.pointerType !== "pen" && event.pointerType !== "mouse") return;
 		if (event.pointerType === "pen") this.penDown = true;
+		const selectionBox = (event.target as Element).closest<HTMLElement>(".goodnodes-pdf-selection");
+		if (selectionBox && this.toolState.tool === "lasso" && this.selected) {
+			const point = this.pagePoint(event, this.selected.page);
+			if (point) {
+				const { page, strokes, display } = this.selected;
+				const handle = (event.target as Element).closest<HTMLElement>(".goodnodes-pdf-selection-handle");
+				const ids = new Set(strokes.map((stroke) => stroke.id));
+				let anchor: [number, number] = point;
+				if (handle) {
+					// Handles are top-left, top-right, bottom-right, bottom-left; scale around the opposite one.
+					const corners: [number, number][] = [
+						[display.x, display.y],
+						[display.x + display.width, display.y],
+						[display.x + display.width, display.y + display.height],
+						[display.x, display.y + display.height],
+					];
+					const [ox, oy] = corners[(Number(handle.dataset.corner) + 2) % 4];
+					anchor = displayedToUnrotated(ox, oy, rotationInfo(this.slots[page]));
+				}
+				this.movingSelection = {
+					pointerId: event.pointerId,
+					page,
+					mode: handle ? "resize" : "move",
+					old: strokes,
+					rest: (this.strokes.get(page) ?? []).filter((stroke) => !ids.has(stroke.id)),
+					start: point,
+					anchor,
+					current: strokes,
+				};
+				try {
+					selectionBox.setPointerCapture(event.pointerId);
+				} catch {
+					/* ignore */
+				}
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			return;
+		}
+		if (
+			this.toolState.tool !== "lasso" &&
+			this.selected &&
+			!(event.target as Element).closest(".goodnodes-pdf-selection")
+		)
+			this.clearSelection();
 		const hit = this.pageAt(event);
 		if (!hit) return;
 		this.activeStroke = { pointerId: event.pointerId, page: hit[0], points: [hit[1]], tool: this.toolState.tool };
+		this.snapped = false;
+		if (this.toolState.tool === "pen" && this.plugin.settings.drawAndHold) {
+			this.holdTimer = window.setTimeout(() => {
+				const active = this.activeStroke;
+				if (!active || active.pointerId !== event.pointerId || active.points.length < 5) return;
+				const shape = recognizeShape(active.points.map(([x, y]) => [x, y]));
+				if (shape) {
+					active.points = shape.points.map(([x, y]) => [x, y, 0.5]);
+					this.snapped = true;
+					this.drawLive(active.page);
+				}
+			}, 600);
+		}
 		try {
 			(event.target as HTMLElement).setPointerCapture(event.pointerId);
 		} catch {
@@ -1202,11 +1262,55 @@ export class PdfNotebookView extends FileView {
 	private pointerMove(event: PointerEvent): void {
 		debug.pointer("pdf", event);
 		if (event.pointerType === "touch") return;
+		if (this.movingSelection?.pointerId === event.pointerId) {
+			const drag = this.movingSelection;
+			const point = this.pagePoint(event, drag.page);
+			if (!point || !this.selected) return;
+			let transform = {
+				dx: point[0] - drag.start[0],
+				dy: point[1] - drag.start[1],
+				scale: 1,
+				originX: 0,
+				originY: 0,
+			};
+			if (drag.mode === "resize") {
+				const from = Math.hypot(drag.start[0] - drag.anchor[0], drag.start[1] - drag.anchor[1]);
+				const to = Math.hypot(point[0] - drag.anchor[0], point[1] - drag.anchor[1]);
+				const scale = Math.max(0.1, Math.min(10, from > 0 ? to / from : 1));
+				transform = { dx: 0, dy: 0, scale, originX: drag.anchor[0], originY: drag.anchor[1] };
+			}
+			drag.current = transformStrokes(drag.old, transform);
+			this.strokes.set(drag.page, [...drag.rest, ...drag.current]);
+			this.selected.strokes = drag.current;
+			this.positionSelectionBox();
+			this.drawCommittedInk(drag.page);
+			event.preventDefault();
+			return;
+		}
 		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
+		if (this.snapped) {
+			event.preventDefault();
+			return;
+		}
 		const events = event.getCoalescedEvents?.() ?? [event];
 		for (const item of events) {
 			const hit = this.pageAt(item);
 			if (hit && hit[0] === this.activeStroke.page) this.activeStroke.points.push(hit[1]);
+		}
+		if (this.activeStroke.tool === "pen" && this.plugin.settings.drawAndHold && !this.snapped) {
+			if (this.holdTimer !== null) window.clearTimeout(this.holdTimer);
+			const pointerId = this.activeStroke.pointerId,
+				page = this.activeStroke.page;
+			this.holdTimer = window.setTimeout(() => {
+				const active = this.activeStroke;
+				if (!active || active.pointerId !== pointerId || active.points.length < 5) return;
+				const shape = recognizeShape(active.points.map(([x, y]) => [x, y]));
+				if (shape) {
+					active.points = shape.points.map(([x, y]) => [x, y, 0.5]);
+					this.snapped = true;
+					this.drawLive(page);
+				}
+			}, 600);
 		}
 		this.drawLive(this.activeStroke.page);
 		event.preventDefault();
@@ -1217,10 +1321,23 @@ export class PdfNotebookView extends FileView {
 		if (event.pointerType === "pen") this.penUntil = Date.now() + 250;
 		if (event.pointerType === "pen") this.penDown = false;
 		this.pointers.delete(event.pointerId);
+		if (this.movingSelection?.pointerId === event.pointerId) {
+			const drag = this.movingSelection;
+			this.movingSelection = null;
+			if (drag.current !== drag.old) {
+				this.history.push({ page: drag.page, added: drag.current, removed: drag.old });
+				this.changed(drag.page);
+			}
+			return;
+		}
 		if (!this.activeStroke || event.pointerId !== this.activeStroke.pointerId) return;
 		const { page, points, tool } = this.activeStroke;
+		if (this.holdTimer !== null) window.clearTimeout(this.holdTimer);
+		this.holdTimer = null;
+		this.snapped = false;
 		this.activeStroke = null;
 		if (tool === "eraser") this.commitEraser(page, points);
+		else if (tool === "lasso") this.selectLasso(page, points);
 		else this.commitInk(page, points, tool);
 		// The live layer only exists while a stroke is in progress (saves a full-page canvas per page).
 		const live = this.slots[page]?.live;
@@ -1251,6 +1368,7 @@ export class PdfNotebookView extends FileView {
 			tool,
 			color: this.toolState.color,
 			width: this.toolState.width,
+			pen: tool === "pen" ? this.toolState.pen : undefined,
 			points,
 		};
 		const existing = this.strokes.get(page) ?? [];
@@ -1288,8 +1406,25 @@ export class PdfNotebookView extends FileView {
 
 	private commitEraser(page: number, points: InkPoint[]): void {
 		const existing = this.strokes.get(page) ?? [];
+		const candidates = this.plugin.settings.eraserHighlighterOnly
+			? existing.filter((s) => s.tool === "highlighter")
+			: existing;
+		if (this.plugin.settings.eraserMode === "precise") {
+			const result = splitStrokesByEraser(
+				points,
+				candidates,
+				this.plugin.settings.eraserSize / (this.pageScale * this.zoom),
+			);
+			if (!result.removed.length) return;
+			const removedIds = new Set(result.removed.map((s) => s.id));
+			const unaffected = existing.filter((s) => !removedIds.has(s.id));
+			this.strokes.set(page, [...unaffected, ...result.added]);
+			this.history.push({ page, added: result.added, removed: result.removed });
+			this.changed(page);
+			return;
+		}
 		const ids = new Set(
-			findEraserHits(points, existing, this.plugin.settings.eraserSize / (this.pageScale * this.zoom)),
+			findEraserHits(points, candidates, this.plugin.settings.eraserSize / (this.pageScale * this.zoom)),
 		);
 		if (!ids.size) return;
 		const removed = existing.filter((stroke) => ids.has(stroke.id));
@@ -1306,6 +1441,177 @@ export class PdfNotebookView extends FileView {
 		this.drawCommittedInk(page);
 		this.updateHistoryButtons();
 		this.scheduleSave();
+	}
+
+	private selectLasso(page: number, points: InkPoint[]): void {
+		this.clearSelection();
+		if (points.length < 3) {
+			if (PdfNotebookView.clipboard.length) {
+				const slot = this.slots[page],
+					origin = points[0],
+					[x, y] = unrotatedToDisplayed(origin[0], origin[1], rotationInfo(slot));
+				slot.el.querySelector(".goodnodes-pdf-paste-bubble")?.remove();
+				const bubble = slot.el.createEl("button", { cls: "goodnodes-pdf-paste-bubble", text: "Paste" });
+				bubble.style.left = `${x * this.pageScale * this.zoom}px`;
+				bubble.style.top = `${y * this.pageScale * this.zoom}px`;
+				bubble.onpointerdown = (event) => event.stopPropagation();
+				bubble.onclick = (event) => {
+					event.stopPropagation();
+					bubble.remove();
+					this.pasteClipboard(page, origin);
+				};
+			}
+			return;
+		}
+		const selected = strokesInLasso(
+			points.map(([x, y]) => [x, y]),
+			this.strokes.get(page) ?? [],
+		);
+		if (!selected.length) return;
+		this.showSelection(page, selected);
+	}
+
+	/** GoodNotes-style selection: dashed box, corner handles, action bar above it. */
+	private showSelection(page: number, strokes: InkStroke[]): void {
+		this.clearSelection();
+		const slot = this.slots[page];
+		if (!slot || !strokes.length) return;
+		const box = slot.el.createDiv({ cls: "goodnodes-pdf-selection" });
+		for (let corner = 0; corner < 4; corner++)
+			box.createSpan({ cls: "goodnodes-pdf-selection-handle" }).dataset.corner = String(corner);
+		const bar = box.createDiv({ cls: "goodnodes-pdf-selection-actions" });
+		const action = (icon: string, title: string, fn: () => void) =>
+			this.iconButton(bar, icon, title, fn, "goodnodes-pdf-selection-action");
+		const current = () => this.selected?.strokes ?? [];
+		const copy = () =>
+			(PdfNotebookView.clipboard = current().map((stroke) => ({
+				...stroke,
+				points: stroke.points.map((point) => [...point] as InkPoint),
+			})));
+		action("scissors", "Cut", () => {
+			copy();
+			this.deleteSelection();
+		});
+		action("copy", "Copy", copy);
+		action("trash-2", "Delete", () => this.deleteSelection());
+		const colorButton = action("palette", "Color", () => {
+			const open = bar.querySelector(".goodnodes-pdf-selection-colors");
+			if (open) {
+				open.remove();
+				return;
+			}
+			const row = bar.createDiv({ cls: "goodnodes-pdf-selection-colors" });
+			for (const color of PEN_COLORS) {
+				const swatch = row.createEl("button", { cls: "goodnodes-pdf-swatch", attr: { title: color } });
+				swatch.style.setProperty("--goodnodes-swatch", color);
+				swatch.onclick = () => this.recolorSelection(color);
+			}
+		});
+		colorButton.addClass("goodnodes-pdf-selection-color-toggle");
+		action("copy-plus", "Duplicate", () => this.duplicateSelection());
+		this.selected = { page, strokes, box, display: { x: 0, y: 0, width: 0, height: 0 } };
+		this.positionSelectionBox();
+	}
+
+	/** Fit the box to the selected strokes at the current zoom (after moves, resizes and zooms). */
+	private positionSelectionBox(): void {
+		const selection = this.selected;
+		if (!selection) return;
+		const slot = this.slots[selection.page];
+		const points = selection.strokes.flatMap((stroke) =>
+			stroke.points.map((p) => unrotatedToDisplayed(p[0], p[1], rotationInfo(slot))),
+		);
+		if (!points.length) return;
+		const margin = Math.max(...selection.strokes.map((stroke) => stroke.width)) / 2 + 4;
+		const xs = points.map((p) => p[0]),
+			ys = points.map((p) => p[1]);
+		const display = {
+			x: Math.min(...xs) - margin,
+			y: Math.min(...ys) - margin,
+			width: Math.max(...xs) - Math.min(...xs) + margin * 2,
+			height: Math.max(...ys) - Math.min(...ys) + margin * 2,
+		};
+		selection.display = display;
+		const scale = this.pageScale * this.zoom;
+		selection.box.style.left = `${display.x * scale}px`;
+		selection.box.style.top = `${display.y * scale}px`;
+		selection.box.style.width = `${Math.max(24, display.width * scale)}px`;
+		selection.box.style.height = `${Math.max(24, display.height * scale)}px`;
+		// No room above the box (top of the page): the action bar goes below it.
+		selection.box.toggleClass("is-bar-below", display.y * scale < 52);
+	}
+
+	private recolorSelection(color: string): void {
+		const selection = this.selected;
+		if (!selection) return;
+		const ids = new Set(selection.strokes.map((stroke) => stroke.id));
+		const recolored = selection.strokes.map((stroke) => ({ ...stroke, id: newStrokeId(), color }));
+		this.strokes.set(selection.page, [
+			...(this.strokes.get(selection.page) ?? []).filter((stroke) => !ids.has(stroke.id)),
+			...recolored,
+		]);
+		this.history.push({ page: selection.page, added: recolored, removed: selection.strokes });
+		selection.strokes = recolored;
+		this.changed(selection.page);
+	}
+
+	/** Pointer position in unrotated page units of `page`, even outside the page element. */
+	private pagePoint(event: PointerEvent, page: number): [number, number] | null {
+		const slot = this.slots[page];
+		if (!slot) return null;
+		const rect = slot.el.getBoundingClientRect(),
+			scale = this.pageScale * this.zoom;
+		return displayedToUnrotated(
+			(event.clientX - rect.left) / scale,
+			(event.clientY - rect.top) / scale,
+			rotationInfo(slot),
+		);
+	}
+
+	private pasteClipboard(page: number, origin: InkPoint): void {
+		const source = PdfNotebookView.clipboard.flatMap((s) => s.points);
+		if (!source.length) return;
+		const cx = source.reduce((n, p) => n + p[0], 0) / source.length,
+			cy = source.reduce((n, p) => n + p[1], 0) / source.length;
+		const pasted = PdfNotebookView.clipboard.map((s) => ({
+			...s,
+			id: newStrokeId(),
+			points: s.points.map(([x, y, pressure]) => [x + origin[0] - cx, y + origin[1] - cy, pressure] as InkPoint),
+		}));
+		this.strokes.set(page, [...(this.strokes.get(page) ?? []), ...pasted]);
+		this.history.push({ page, added: pasted, removed: [] });
+		this.changed(page);
+		this.showSelection(page, pasted);
+	}
+
+	private clearSelection(): void {
+		this.selected?.box.remove();
+		this.selected = null;
+	}
+	private deleteSelection(): void {
+		if (!this.selected) return;
+		const { page, strokes } = this.selected,
+			ids = new Set(strokes.map((s) => s.id));
+		this.strokes.set(
+			page,
+			(this.strokes.get(page) ?? []).filter((s) => !ids.has(s.id)),
+		);
+		this.history.push({ page, added: [], removed: strokes });
+		this.clearSelection();
+		this.changed(page);
+	}
+	private duplicateSelection(): void {
+		if (!this.selected) return;
+		const { page, strokes } = this.selected;
+		const copies = strokes.map((s) => ({
+			...s,
+			id: newStrokeId(),
+			points: s.points.map(([x, y, p]) => [x + 12, y + 12, p] as InkPoint),
+		}));
+		this.strokes.set(page, [...(this.strokes.get(page) ?? []), ...copies]);
+		this.history.push({ page, added: copies, removed: [] });
+		this.changed(page);
+		this.showSelection(page, copies);
 	}
 
 	private drawCommittedInk(page: number): void {
@@ -1347,6 +1653,25 @@ export class PdfNotebookView extends FileView {
 			ctx.stroke();
 			return;
 		}
+		if (this.activeStroke.tool === "lasso") {
+			const slot = this.slots[page],
+				scale = this.pageScale * this.zoom,
+				factor = canvas.width / (slot.width * scale);
+			ctx.beginPath();
+			ctx.setLineDash([5 * factor, 4 * factor]);
+			ctx.lineWidth = 1.5 * factor;
+			ctx.strokeStyle = "var(--interactive-accent)";
+			this.activeStroke.points.forEach(([x, y], i) => {
+				const [dx, dy] = unrotatedToDisplayed(x, y, rotationInfo(slot));
+				if (i) ctx.lineTo(dx * scale * factor, dy * scale * factor);
+				else ctx.moveTo(dx * scale * factor, dy * scale * factor);
+			});
+			ctx.strokeStyle =
+				getComputedStyle(this.contentEl).getPropertyValue("--interactive-accent").trim() || "#7c5cff";
+			ctx.stroke();
+			ctx.setLineDash([]);
+			return;
+		}
 		const stroke: InkStroke = {
 			id: "live",
 			tool: this.activeStroke.tool,
@@ -1361,39 +1686,29 @@ export class PdfNotebookView extends FileView {
 		const slot = this.slots[Number(canvas.parentElement?.dataset.page)];
 		const scale = this.pageScale * this.zoom;
 		const factor = canvas.width / ((slot?.width ?? this.baseWidth) * scale);
-		const smooth = this.plugin.settings.smoothing;
 		const points = stroke.points.map(([x, y, pressure]) => {
 			const [displayX, displayY] = slot ? unrotatedToDisplayed(x, y, rotationInfo(slot)) : [x, y];
 			return [displayX * scale * factor, displayY * scale * factor, pressure];
 		});
 		const width = stroke.width * scale * factor;
-		if (stroke.tool === "highlighter") {
-			ctx.save();
-			ctx.globalCompositeOperation = "multiply";
-			ctx.globalAlpha = 0.35;
-			ctx.strokeStyle = stroke.color;
-			ctx.lineWidth = Math.max(1, width * 5);
-			ctx.lineCap = "butt";
-			ctx.lineJoin = "bevel";
-			ctx.beginPath();
-			points.forEach(([x, y], index) => (index ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-			ctx.stroke();
-			ctx.restore();
-			return;
-		}
 		const outline = getStroke(points, {
-			size: width,
-			thinning: 0.6,
-			smoothing: smooth ? 0.5 : 0,
-			streamline: smooth ? 0.5 : 0,
+			...strokeOptions(stroke.tool, stroke.pen, width),
 		});
 		if (!outline.length) return;
 		ctx.beginPath();
 		ctx.moveTo(outline[0][0], outline[0][1]);
 		for (let i = 1; i < outline.length; i++) ctx.lineTo(outline[i][0], outline[i][1]);
 		ctx.closePath();
+		if (stroke.tool === "highlighter") {
+			ctx.globalCompositeOperation = "multiply";
+			ctx.globalAlpha = 0.35;
+		}
 		ctx.fillStyle = stroke.color;
 		ctx.fill();
+		if (stroke.tool === "highlighter") {
+			ctx.globalCompositeOperation = "source-over";
+			ctx.globalAlpha = 1;
+		}
 	}
 
 	private blockStylusTouch(event: TouchEvent): void {
@@ -1470,6 +1785,7 @@ export class PdfNotebookView extends FileView {
 		this.updateAddPageTile();
 		this.pinch = null;
 		this.updatePagePadding();
+		this.positionSelectionBox();
 		this.updateSnapping();
 		this.applyZoomAnchor(gesture.anchor, gesture.centerX, gesture.centerY);
 		if (this.horizontal && this.zoom <= 1.001) {
@@ -1481,6 +1797,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private undo(): void {
+		this.clearSelection();
 		const entry = this.history.undo(this.strokes);
 		if (entry) {
 			this.jumpTo(entry.page);
@@ -1490,6 +1807,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private redo(): void {
+		this.clearSelection();
 		const entry = this.history.redo(this.strokes);
 		if (entry) {
 			this.jumpTo(entry.page);
@@ -1499,15 +1817,33 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private updateHistoryButtons(): void {
-		const buttons = this.historyToolbar.querySelectorAll("button");
-		if (buttons[0]) (buttons[0] as HTMLButtonElement).disabled = !this.history.canUndo;
-		if (buttons[1]) (buttons[1] as HTMLButtonElement).disabled = !this.history.canRedo;
+		this.goodnodesToolbar?.refresh();
 	}
 
 	private handleKeydown(event: KeyboardEvent): void {
 		const target = event.target as HTMLElement | null;
 		if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
 		if (event.metaKey || event.ctrlKey || event.altKey) {
+			if ((event.metaKey || event.ctrlKey) && this.selected && ["c", "x"].includes(event.key.toLowerCase())) {
+				PdfNotebookView.clipboard = this.selected.strokes;
+				if (event.key.toLowerCase() === "x") this.deleteSelection();
+				event.preventDefault();
+				return;
+			}
+			if (
+				(event.metaKey || event.ctrlKey) &&
+				event.key.toLowerCase() === "v" &&
+				PdfNotebookView.clipboard.length
+			) {
+				const slot = this.slots[this.currentPage],
+					rect = slot?.el.getBoundingClientRect();
+				if (slot && rect) {
+					const center = displayedToUnrotated(slot.width / 2, slot.height / 2, rotationInfo(slot));
+					this.pasteClipboard(this.currentPage, [center[0], center[1], 0.5]);
+				}
+				event.preventDefault();
+				return;
+			}
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
 				event.preventDefault();
 				if (event.shiftKey) this.redo();
@@ -1516,6 +1852,20 @@ export class PdfNotebookView extends FileView {
 			return;
 		}
 		if (event.shiftKey) return;
+		if (event.key === "Delete" || event.key === "Backspace") {
+			if (this.selected) {
+				event.preventDefault();
+				this.deleteSelection();
+			}
+			return;
+		}
+		if (event.key === "Delete" || event.key === "Backspace") {
+			if (this.selected) {
+				event.preventDefault();
+				this.deleteSelection();
+			}
+			return;
+		}
 		if (["ArrowRight", "PageDown", " "].includes(event.key)) {
 			event.preventDefault();
 			this.jumpTo(this.currentPage + 1);
@@ -1788,10 +2138,7 @@ export class PdfNotebookView extends FileView {
 				const [screenX, screenY] = unrotatedToDisplayed(x, y, rotationInfo(slot));
 				return [screenX * scale, screenY * scale, pressure];
 			});
-			const outline = getStroke(points, {
-				size: stroke.width * scale * (stroke.tool === "highlighter" ? 5 : 1),
-				thinning: stroke.tool === "highlighter" ? 0 : 0.6,
-			});
+			const outline = getStroke(points, strokeOptions(stroke.tool, stroke.pen, stroke.width * scale));
 			if (!outline.length) continue;
 			ctx.globalAlpha = stroke.tool === "highlighter" ? 0.35 : 1;
 			ctx.fillStyle = stroke.color;
@@ -2210,6 +2557,7 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private clearDocument(): void {
+		this.clearSelection();
 		this.disposed = true;
 		this.pendingRestore = null;
 		if (this.saveTimer !== null) {
@@ -2236,7 +2584,6 @@ export class PdfNotebookView extends FileView {
 		this.doc?.destroy?.();
 		this.doc = null;
 		this.pagesEl.empty();
-		this.closePopover();
 		this.sidebar?.remove();
 		this.sidebar = null;
 		this.sidebarContent = null;

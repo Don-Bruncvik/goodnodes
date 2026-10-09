@@ -4,7 +4,7 @@ import { CANVAS_EXTENSION, CANVAS_VIEW_TYPE, CanvasView, emptyCanvasFile } from 
 import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
 import { askNotebookOptions, createNotebook, createNotebookFromImages } from "./notebook";
 import { availablePath, isImage, isPdf, pickFiles } from "./files";
-import { DEFAULT_SETTINGS, GoodNodesSettingTab, type GoodNodesSettings } from "./settings";
+import { BASIC_COLORS, DEFAULT_SETTINGS, GoodNodesSettingTab, type ColorKey, type GoodNodesSettings } from "./settings";
 
 export default class GoodNodesPlugin extends Plugin {
 	debugPanel = new DebugPanel();
@@ -12,7 +12,27 @@ export default class GoodNodesPlugin extends Plugin {
 	private debugRibbon: HTMLElement | null = null;
 
 	async onload(): Promise<void> {
-		this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<GoodNodesSettings> | null) };
+		const saved = ((await this.loadData()) as Partial<GoodNodesSettings> | null) ?? {};
+		this.settings = { ...DEFAULT_SETTINGS, ...saved };
+		// Custom colors: saved ones, else the color in use (if it isn't a basic one), then defaults.
+		const custom = (key: ColorKey, current: string | undefined) => {
+			const own = current && !BASIC_COLORS[key].includes(current.toLowerCase()) ? [current.toLowerCase()] : [];
+			return (saved.customColors?.[key] ?? [...own, ...DEFAULT_SETTINGS.customColors[key]]).slice(0, 2);
+		};
+		this.settings.customColors = {
+			pen: custom("pen", saved.penColor),
+			highlighter: custom("highlighter", saved.highlighterColor),
+			text: custom("text", saved.canvasTextColor),
+			shapes: custom("shapes", undefined),
+		};
+		// Three different thicknesses, thin to thick, keeping the one in use.
+		const widths = (saved: number[] | undefined, current: number | undefined, defaults: number[]) => {
+			if (saved?.length === 3) return saved;
+			const set = [...new Set([...(current !== undefined ? [current] : []), ...defaults])];
+			return set.slice(0, 3).sort((a, b) => a - b);
+		};
+		this.settings.penWidths = widths(saved.penWidths, saved.penWidth, [1, 2, 4]);
+		this.settings.highlighterWidths = widths(saved.highlighterWidths, saved.highlighterWidth, [1.6, 2.4, 3.6]);
 		this.addSettingTab(new GoodNodesSettingTab(this.app, this));
 		debug.log(`GoodNodes ${this.manifest.version} loaded, UA: ${navigator.userAgent}`);
 		window.addEventListener("error", this.onWindowError);
@@ -43,12 +63,6 @@ export default class GoodNodesPlugin extends Plugin {
 							.setTitle("New GoodNodes whiteboard")
 							.setIcon("presentation")
 							.onClick(() => void this.newWhiteboard(file)),
-					);
-					menu.addItem((item) =>
-						item
-							.setTitle("New text document")
-							.setIcon("file-text")
-							.onClick(() => void this.newTextDoc(file)),
 					);
 					menu.addItem((item) =>
 						item
@@ -173,15 +187,6 @@ export default class GoodNodesPlugin extends Plugin {
 
 	async newWhiteboard(folder?: TFolder): Promise<void> {
 		await this.run("create the whiteboard", async () => this.createCanvas(this.target(folder)));
-	}
-
-	/** GoodNotes "Text Doc" = a regular Obsidian note. */
-	async newTextDoc(folder?: TFolder): Promise<void> {
-		await this.run("create the document", async () => {
-			const path = availablePath(this.app, this.target(folder), "Untitled document", "md");
-			const file = await this.app.vault.create(path, "");
-			await this.app.workspace.getLeaf(true).openFile(file, { state: { mode: "source" } });
-		});
 	}
 
 	/** PDFs are copied as they are; picked images become one notebook (a page per image). */

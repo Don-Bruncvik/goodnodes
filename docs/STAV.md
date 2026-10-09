@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.4)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.5.0)
 
 ## Výsledky spike M0
 
@@ -44,6 +44,16 @@
 - Pri listovaní ako v knihe je najmenší zoom celá strana a PDF sa vždy otvorí na celú výšku. Strany sa už nezoradia vedľa seba.
 - Zoom (pinch aj menu) nepreblikáva: strana ostane viditeľná, kým sa ostrá verzia nevykreslí na pozadí.
 - Bočný panel odsúva strany aj na iPade na výšku (užší, jeden stĺpec miniatúr). Panel nástrojov a číslo strany sa vycentrujú vo zvyšnom priestore. Ako prekrytie ostáva len na úzkych obrazovkách (pod 600 px).
+
+**0.5.0 (nástroje ako GoodNotes, jeden toolbar všade):**
+- Spoločný toolbar pre PDF, zošity aj whiteboard v jednom riadku: laso, pero, zvýrazňovač, guma, text, tvary, obrázok. Hneď vedľa sú voľby aktívneho nástroja (druhý riadok GoodNotes): typ pera, 3 hrúbky, 3 základné farby a 2 vlastné (vybratú vlastnú zmeníš ďalším klepnutím). Na konci späť, vpred a „…“. Keď sa nezmestí (na výšku, s bočným panelom), voľby idú do druhého riadku. Na whiteboarde nahrádza panel Excalidrawu; knižnica, papier, Insert PDF a „Draw with finger“ sú v „…“.
+- Typy pera: plniace, guľôčkové, štetec. Draw and hold: nakreslený kruh, čiara, obdĺžnik alebo trojuholník sa po podržaní pera zarovná na dokonalý tvar (v PDF aj na whiteboarde, späť ho zmaže jedným krokom).
+- Laso: v PDF vlastné (presun, zväčšenie za rohy, vystrihnúť, kopírovať, vložiť, zmazať, farba, duplikovať, späť); na whiteboarde označí prvky a ďalej ich ovláda Excalidraw.
+- Guma v PDF: presná alebo celý ťah, „len zvýrazňovač“. Na whiteboarde maže celé prvky.
+- Zvýrazňovač aj na whiteboarde.
+- V PDF sú text, tvary a obrázok v toolbare zatiaľ neaktívne („Coming soon“).
+- Posuvník strán je pri listovaní do strán vodorovný dole.
+- Odstránené „New text document“ (Obsidian poznámky už má).
 
 **0.4.4 (kontrola UI na iPade):** automatická kontrola všetkých obrazoviek, menu a dialógov v emulácii iPadu (na šírku aj na výšku): stlačené alebo prázdne tlačidlá, pretekajúci text, prekrývanie.
 - Opravené: tlačidlá Excalidrawu na whiteboarde (hlavné menu, More tools, zoom −/+, späť/vpred, pomocník) boli na iPade prázdne, rovnaký problém s okrajmi tlačidiel ako pri pere v 0.4.2.

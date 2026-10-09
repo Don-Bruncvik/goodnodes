@@ -1,4 +1,4 @@
-import type { InkPoint, InkStroke } from "./model";
+import { newStrokeId, type InkPoint, type InkStroke } from "./model";
 
 export function findEraserHits(path: InkPoint[], strokes: InkStroke[], radius = 8): string[] {
 	if (!path.length) return [];
@@ -31,6 +31,62 @@ export function findEraserHits(path: InkPoint[], strokes: InkStroke[], radius = 
 			return false;
 		})
 		.map((stroke) => stroke.id);
+}
+
+/** Split each hit stroke at eraser crossings, keeping untouched runs as independent strokes. */
+export function splitStrokesByEraser(
+	path: InkPoint[],
+	strokes: InkStroke[],
+	radius: number,
+): { removed: InkStroke[]; added: InkStroke[] } {
+	if (!path.length) return { removed: [], added: [] };
+	const removed: InkStroke[] = [],
+		added: InkStroke[] = [];
+	for (const stroke of strokes) {
+		const samples: InkPoint[] = [];
+		for (let i = 0; i < stroke.points.length; i++) {
+			const a = stroke.points[i - 1],
+				b = stroke.points[i];
+			if (i === 0) samples.push(b);
+			else {
+				const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.max(1, radius * 0.4)));
+				for (let j = 1; j <= steps; j++) {
+					const t = j / steps;
+					samples.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+				}
+			}
+		}
+		const kept: InkPoint[][] = [];
+		let run: InkPoint[] = [];
+		for (const point of samples) {
+			if (nearPath(point, path, radius)) {
+				if (run.length >= 2) kept.push(run);
+				run = [];
+			} else {
+				if (run.length && distanceSquared(run[run.length - 1], point) > radius * radius * 9) {
+					if (run.length >= 2) kept.push(run);
+					run = [];
+				}
+				run.push(point);
+			}
+		}
+		if (run.length >= 2) kept.push(run);
+		// Strokes the eraser didn't touch stay exactly as they are (no new id, no undo noise).
+		if (samples.some((point) => nearPath(point, path, radius))) {
+			removed.push(stroke);
+			for (const points of kept) added.push({ ...stroke, id: newStrokeId(), points });
+		}
+	}
+	return { removed, added };
+}
+
+function nearPath(point: InkPoint, path: InkPoint[], radius: number): boolean {
+	const r2 = radius * radius;
+	return path.some((candidate, i) =>
+		i === 0
+			? distanceSquared(point, candidate) <= r2
+			: pointSegmentDistanceSquared(point, path[i - 1], candidate) <= r2,
+	);
 }
 
 function distanceSquared(a: InkPoint, b: InkPoint): number {

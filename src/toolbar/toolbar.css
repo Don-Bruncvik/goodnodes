@@ -1,0 +1,241 @@
+.goodnodes-toolbar-host {
+	position: absolute;
+	z-index: 100;
+	top: 8px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-items: center;
+	gap: 2px;
+	/* Absolutely positioned at left: 50% the island would only get half the width and
+	   wrap early; size it to its content instead. */
+	width: max-content;
+	max-width: calc(100% - 16px);
+	padding: 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-primary);
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+	white-space: nowrap;
+}
+/* Too narrow for one row: tools + undo/redo stay on top, the active tool's options go
+   to a second row underneath (GoodNotes' two rows). */
+.goodnodes-toolbar-host .goodnodes-toolbar-tools {
+	order: 1;
+}
+.goodnodes-toolbar-host .goodnodes-toolbar-options {
+	order: 2;
+}
+.goodnodes-toolbar-host .goodnodes-toolbar-actions {
+	order: 3;
+}
+.goodnodes-toolbar-host.is-stacked .goodnodes-toolbar-options {
+	order: 4;
+	flex-basis: 100%;
+}
+/* Narrower still (iPad portrait with the pages sidebar): tools alone on top, undo/redo
+   and the options share the second row. */
+.goodnodes-toolbar-host.is-compact .goodnodes-toolbar-tools {
+	flex-basis: 100%;
+	justify-content: center;
+}
+.goodnodes-toolbar-row {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 2px;
+	min-height: 40px;
+}
+.goodnodes-toolbar-options {
+	justify-content: center;
+}
+.goodnodes-toolbar-separator {
+	flex: 0 0 1px;
+	height: 25px;
+	margin: 0 3px;
+	background: var(--background-modifier-border);
+}
+.goodnodes-toolbar-host button {
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 40px;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	min-width: 40px;
+	height: 40px;
+	min-height: 40px;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text-normal);
+}
+.goodnodes-toolbar-host button:hover {
+	background: var(--background-modifier-hover);
+}
+.goodnodes-toolbar-host button.is-active {
+	background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+	color: var(--interactive-accent);
+}
+.goodnodes-toolbar-host button:disabled {
+	opacity: 0.4;
+}
+.goodnodes-toolbar-host svg {
+	width: 19px;
+	height: 19px;
+	flex: none;
+}
+.goodnodes-toolbar-color {
+	border-radius: 50% !important;
+	corner-shape: round;
+}
+.goodnodes-toolbar-color::after {
+	content: "";
+	width: 21px;
+	height: 21px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 50%;
+	corner-shape: round;
+	background: var(--goodnodes-toolbar-color);
+	flex: none;
+}
+.goodnodes-toolbar-width {
+	border: 1px solid transparent !important;
+}
+.goodnodes-toolbar-dot {
+	border-radius: 50%;
+	background: var(--text-normal);
+	flex: none;
+}
+.goodnodes-toolbar-chevron {
+	position: absolute;
+	right: 1px;
+	bottom: 1px;
+	display: flex;
+}
+.goodnodes-toolbar-chevron svg {
+	width: 11px;
+	height: 11px;
+}
+.goodnodes-toolbar-segment {
+	flex: none !important;
+	width: auto !important;
+	min-width: 0 !important;
+	padding: 0 8px !important;
+	font-size: var(--font-ui-small);
+}
+.goodnodes-toolbar-shape svg {
+	width: 18px;
+	height: 18px;
+}
+.goodnodes-toolbar-popover {
+	position: absolute;
+	z-index: 120;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: max-content;
+	max-width: calc(100vw - 16px);
+	padding: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-primary);
+	box-shadow: 0 5px 20px rgba(0, 0, 0, 0.24);
+}
+.goodnodes-toolbar-menu {
+	flex-direction: column;
+	align-items: stretch;
+}
+.goodnodes-toolbar-menu button {
+	flex: none;
+	width: auto;
+	padding: 0 10px;
+	justify-content: flex-start;
+}
+.goodnodes-toolbar-switch-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 6px 4px;
+	font-size: var(--font-ui-small);
+}
+.goodnodes-toolbar-host .goodnodes-toolbar-switch {
+	position: relative;
+	flex: 0 0 38px;
+	width: 38px;
+	min-width: 38px;
+	height: 22px;
+	min-height: 22px;
+	border-radius: 12px;
+	background: var(--background-modifier-border);
+}
+.goodnodes-toolbar-switch::after {
+	content: "";
+	position: absolute;
+	left: 2px;
+	top: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: var(--background-primary);
+	box-shadow: 0 1px 3px #0004;
+	transition: transform 120ms ease;
+}
+.goodnodes-toolbar-switch.is-on {
+	background: var(--interactive-accent);
+}
+.goodnodes-toolbar-switch.is-on::after {
+	transform: translateX(16px);
+}
+.goodnodes-toolbar-host .goodnodes-toolbar-popover input[type="color"] {
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+.goodnodes-canvas-host > .goodnodes-toolbar-host {
+	pointer-events: auto;
+}
+.goodnodes-canvas-host .App-toolbar,
+.goodnodes-canvas-host .App-toolbar--mobile,
+.goodnodes-canvas-host .App-bottom-bar,
+.goodnodes-canvas-host .layer-ui__wrapper__footer,
+.goodnodes-canvas-host .App-menu__left .dropdown-menu-button,
+.goodnodes-canvas-host .goodnodes-top-right {
+	display: none !important;
+}
+.goodnodes-canvas-host .App-menu__right {
+	top: 0;
+	right: 0;
+}
+.goodnodes-canvas-host .goodnodes-toolbar-host {
+	pointer-events: auto;
+}
+/* Whiteboard: the rest of Excalidraw's chrome. Its main menu, library and hand/lock
+   tools are reachable from our More (…) menu or not needed (fingers pan). */
+.goodnodes-canvas-host .main-menu-trigger,
+.goodnodes-canvas-host .sidebar-trigger__label-element,
+.goodnodes-canvas-host .default-sidebar-trigger,
+.goodnodes-canvas-host .mobile-misc-tools-container {
+	display: none !important;
+}
+/* The selected custom color: the system color picker opens from an invisible input on it. */
+.goodnodes-toolbar-color.is-custom {
+	position: relative;
+}
+.goodnodes-toolbar-color-input {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	opacity: 0;
+	cursor: pointer;
+}

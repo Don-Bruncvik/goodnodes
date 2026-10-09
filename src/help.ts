@@ -18,18 +18,19 @@ export class GoodNodesHelpModal extends Modal {
 		section("Writing", [
 			"The pen (or mouse) writes. Fingers never draw.",
 			"One finger moves the page, two fingers zoom – also while holding the pen.",
-			"Tap the pen once to select it, tap it again to choose color and width.",
+			"Toolbar: lasso, pen, highlighter, eraser, text, shapes, image; the active tool's options sit right next to them.",
+			"Colors: three basic ones and two of your own – tap your color again to change it.",
+			"Draw a line, circle, rectangle or triangle and hold the pencil still: it snaps to a perfect shape.",
 			"Scribble firmly back and forth over handwriting to erase it (scratch out). Undo brings it back.",
 		]);
 		section("Create (right-click a folder, long-press on iPad)", [
 			"New GoodNodes notebook: pages with a cover and paper (blank, ruled, grid, dots).",
 			"New GoodNodes whiteboard: an infinite canvas for mind maps, text, shapes and images.",
-			"New text document: a normal Obsidian note.",
 			"Import into GoodNodes here: copy PDFs or images from Files into the folder.",
 		]);
 		section("Whiteboards", [
 			"Text, shapes, arrows and images are in the top toolbar; the paper button switches blank, grid and dots.",
-			"Insert PDF (button top right, or ☰): its pages are placed on the board as images you can write on.",
+			"Insert PDF (in the … menu): its pages are placed on the board as images you can write on.",
 			"Library: select something, choose “Add to library”, and reuse it in any whiteboard.",
 		]);
 		section("Notebooks and PDFs", [

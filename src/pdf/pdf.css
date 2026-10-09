@@ -86,9 +86,6 @@
 .goodnodes-pdf-toolbar {
 	position: absolute;
 	z-index: 12;
-	display: flex;
-	align-items: center;
-	gap: 2px;
 	padding: 4px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 10px;
@@ -178,6 +175,163 @@
 	align-items: center;
 	justify-content: center;
 	gap: 4px;
+}
+.goodnodes-pdf-pen-types,
+.goodnodes-pdf-segmented {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+}
+.goodnodes-pdf-pen-types button {
+	flex: 0 0 40px;
+	width: 40px;
+	height: 40px;
+}
+.goodnodes-pdf-segmented button {
+	flex: 1 1 auto;
+	width: auto;
+	padding: 0 8px;
+	font-size: var(--font-ui-small);
+}
+.goodnodes-pdf-switch-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	padding: 7px 4px;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+.goodnodes-pdf-switch-row button.goodnodes-finger-switch {
+	position: relative;
+	flex: 0 0 38px;
+	width: 38px;
+	min-width: 38px;
+	height: 22px;
+	min-height: 22px;
+	border: 0;
+	border-radius: 12px;
+	background: var(--background-modifier-border);
+}
+.goodnodes-pdf-switch-row button.goodnodes-finger-switch::after {
+	content: "";
+	position: absolute;
+	left: 2px;
+	top: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: var(--background-primary);
+	box-shadow: 0 1px 3px #0004;
+	transition: transform 120ms ease;
+}
+.goodnodes-pdf-switch-row button.goodnodes-finger-switch.is-on {
+	background: var(--interactive-accent);
+}
+.goodnodes-pdf-switch-row button.goodnodes-finger-switch.is-on::after {
+	transform: translateX(16px);
+}
+.goodnodes-pdf-selection {
+	position: absolute;
+	z-index: 5;
+	touch-action: none;
+	cursor: move;
+	border: 1.5px dashed var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+	pointer-events: auto;
+}
+/* Handles: a 24px target for the pencil, drawn as a 10px dot. */
+.goodnodes-pdf-selection-handle {
+	position: absolute;
+	width: 24px;
+	height: 24px;
+	margin: -12px;
+	touch-action: none;
+}
+.goodnodes-pdf-selection-handle::after {
+	position: absolute;
+	inset: 7px;
+	border: 1.5px solid var(--interactive-accent);
+	border-radius: 50%;
+	background: var(--background-primary);
+	content: "";
+}
+.goodnodes-pdf-selection-handle[data-corner="0"] {
+	left: 0;
+	top: 0;
+	cursor: nwse-resize;
+}
+.goodnodes-pdf-selection-handle[data-corner="1"] {
+	left: 100%;
+	top: 0;
+	cursor: nesw-resize;
+}
+.goodnodes-pdf-selection-handle[data-corner="2"] {
+	left: 100%;
+	top: 100%;
+	cursor: nwse-resize;
+}
+.goodnodes-pdf-selection-handle[data-corner="3"] {
+	left: 0;
+	top: 100%;
+	cursor: nesw-resize;
+}
+.goodnodes-pdf-selection.is-bar-below .goodnodes-pdf-selection-actions {
+	top: calc(100% + 14px);
+	bottom: auto;
+}
+.goodnodes-pdf-selection-colors {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 50%;
+	display: grid;
+	grid-template-columns: repeat(5, 36px);
+	gap: 2px;
+	padding: 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: 0 2px 8px #0003;
+	transform: translateX(-50%);
+}
+.goodnodes-pdf-selection-colors .goodnodes-pdf-swatch {
+	width: 36px;
+	height: 36px;
+}
+.goodnodes-pdf-selection-actions {
+	position: absolute;
+	left: 50%;
+	bottom: calc(100% + 8px);
+	display: flex;
+	gap: 2px;
+	padding: 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: 0 2px 8px #0003;
+	transform: translateX(-50%);
+	pointer-events: auto;
+}
+.goodnodes-pdf-selection-action {
+	width: 32px !important;
+	min-width: 32px !important;
+	height: 32px !important;
+	flex: 0 0 32px !important;
+}
+.goodnodes-pdf-paste-bubble {
+	position: absolute;
+	z-index: 8;
+	width: auto !important;
+	min-width: 0 !important;
+	height: 32px !important;
+	padding: 0 10px !important;
+	border: 1px solid var(--interactive-accent) !important;
+	border-radius: 16px !important;
+	background: var(--background-primary) !important;
+	color: var(--interactive-accent) !important;
+	box-shadow: 0 2px 8px #0003;
+	transform: translate(8px, 8px);
 }
 .goodnodes-pdf-popover-colors {
 	display: grid;
@@ -295,6 +449,33 @@
 .goodnodes-pdf-scrubber.is-visible .goodnodes-pdf-scrubber-bubble,
 .goodnodes-pdf-scrubber.is-visible .goodnodes-pdf-scrubber-thumb {
 	transform: translateY(var(--goodnodes-scrubber-y, 0));
+}
+/* Book mode: the scrubber is a horizontal strip along the bottom, above the page number. */
+.goodnodes-pdf-root.is-horizontal .goodnodes-pdf-scrubber {
+	top: auto;
+	right: 64px;
+	bottom: 52px;
+	left: 64px;
+	width: auto;
+	height: 32px;
+}
+.goodnodes-pdf-root.is-horizontal .goodnodes-pdf-scrubber-thumb {
+	top: 13px;
+	right: auto;
+	left: 0;
+	width: 44px;
+	height: 6px;
+}
+.goodnodes-pdf-root.is-horizontal .goodnodes-pdf-scrubber-bubble {
+	top: auto;
+	right: auto;
+	bottom: 26px;
+	left: -20px;
+}
+@container (min-width: 600px) {
+	.goodnodes-pdf-root.is-horizontal.has-sidebar .goodnodes-pdf-scrubber {
+		left: calc(var(--goodnodes-sidebar-width) + 24px);
+	}
 }
 
 .goodnodes-pdf-sidebar {

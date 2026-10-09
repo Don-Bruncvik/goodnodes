@@ -75,9 +75,8 @@
    and the "thin lines" pen popover on the iPad). Its rule is
    `.is-tablet button:not(.clickable-icon)`, so ours needs the same `:not()` to win. */
 .goodnodes-pdf-root button:not(.clickable-icon),
+.goodnodes-toolbar-host button:not(.clickable-icon),
 .goodnodes-pdf-popover button:not(.clickable-icon),
-.goodnodes-pen-popover button:not(.clickable-icon),
-.goodnodes-text-popover button:not(.clickable-icon),
 .goodnodes-canvas-host .goodnodes-bg-button:not(.clickable-icon),
 .goodnodes-bg-menu button:not(.clickable-icon),
 .goodnodes-notebook-modal button.goodnodes-notebook-swatch:not(.clickable-icon),
@@ -86,17 +85,21 @@
 	padding-right: 0;
 }
 .goodnodes-pdf-root button svg,
+.goodnodes-toolbar-host button svg,
 .goodnodes-pdf-popover button svg,
-.goodnodes-pen-popover button svg,
-.goodnodes-text-popover button svg,
 .goodnodes-canvas-host .goodnodes-bg-button svg,
 .goodnodes-bg-menu button svg,
 .goodnodes-pdf-swatch::after,
 .goodnodes-pdf-width-sample {
 	flex: none;
 }
-.goodnodes-text-popover .goodnodes-pen-swatch-fill {
-	flex: none;
+.goodnodes-toolbar-host button:not(.clickable-icon) {
+	padding-left: 0;
+	padding-right: 0;
+}
+.goodnodes-toolbar-host .goodnodes-toolbar-color {
+	border-radius: 50%;
+	corner-shape: round;
 }
 .goodnodes-bg-menu button:not(.clickable-icon) {
 	padding-left: 8px;
@@ -121,7 +124,7 @@
 	padding: 0;
 }
 /* Obsidian centers button content; the knob must start at the left to slide right. */
-.goodnodes-pen-popover .goodnodes-finger-switch:not(.clickable-icon) {
+.goodnodes-pdf-popover .goodnodes-finger-switch:not(.clickable-icon) {
 	flex: none;
 	justify-content: flex-start;
 	padding: 2px;

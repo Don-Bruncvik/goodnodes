@@ -1,11 +1,13 @@
 export type InkPoint = [number, number, number];
 export type InkTool = "pen" | "highlighter";
+import type { PenType } from "../ink/penStyle";
 
 export interface InkStroke {
 	id: string;
 	tool: InkTool;
 	color: string;
 	width: number;
+	pen?: PenType;
 	points: InkPoint[];
 }
 

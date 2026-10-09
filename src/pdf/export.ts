@@ -1,6 +1,7 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import { getStroke } from "perfect-freehand";
 import type { InkPoint, InkStroke } from "./model";
+import { strokeOptions } from "../ink/penStyle";
 
 export interface PageBox {
 	x: number;
@@ -26,12 +27,7 @@ export function viewportToPdfPoint(x: number, y: number, box: PageBox, rotation:
 export function strokeToSvgPath(stroke: InkStroke): string {
 	const outline = getStroke(
 		stroke.points.map(([x, y, pressure]) => [x, y, pressure]),
-		{
-			size: stroke.width * (stroke.tool === "highlighter" ? 5 : 1),
-			thinning: stroke.tool === "highlighter" ? 0 : 0.6,
-			smoothing: 0.5,
-			streamline: 0.35,
-		},
+		strokeOptions(stroke.tool, stroke.pen, stroke.width),
 	);
 	if (!outline.length) return "";
 	return `M ${outline.map(([x, y]) => `${round(x)} ${round(y)}`).join(" L ")} Z`;
@@ -48,12 +44,7 @@ export async function createAnnotatedPdf(
 		for (const stroke of strokes) {
 			const outline = getStroke(
 				stroke.points.map(([x, y, pressure]) => [x, y, pressure]),
-				{
-					size: stroke.width * (stroke.tool === "highlighter" ? 5 : 1),
-					thinning: stroke.tool === "highlighter" ? 0 : 0.6,
-					smoothing: 0.5,
-					streamline: 0.35,
-				},
+				strokeOptions(stroke.tool, stroke.pen, stroke.width),
 			);
 			if (!outline.length) continue;
 			// SVG coordinates in pdf-lib are y-down, so map back through the page's rotation.
