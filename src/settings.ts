@@ -31,13 +31,6 @@ export interface GoodNodesSettings {
 	openPdfByDefault: boolean;
 	/** Folder for images pasted into canvases; empty = Obsidian's attachment setting. */
 	imageFolder: string;
-	/** The GoodNodes library ("Documents"): this vault folder and its subfolders. Empty = vault root. */
-	libraryFolder: string;
-	/** Paths starred in the library. Kept up to date on rename/delete. */
-	favorites: string[];
-	/** Library folder colors by folder path (hex). */
-	folderColors: Record<string, string>;
-	libraryLayout: "grid" | "list";
 	showDebugRibbon: boolean;
 	/** Canvas library items ("Add to library"), shared by all notebooks. Not shown in the tab. */
 	library: unknown[];
@@ -59,10 +52,6 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	palmMaxTouchSize: 0,
 	openPdfByDefault: false,
 	imageFolder: "",
-	libraryFolder: "GoodNodes",
-	favorites: [],
-	folderColors: {},
-	libraryLayout: "grid",
 	showDebugRibbon: false,
 	library: [],
 };
@@ -144,17 +133,6 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 					.setPlaceholder("e.g. Attachments")
 					.setValue(s.imageFolder)
 					.onChange((v) => ((s.imageFolder = v.trim()), save())),
-			);
-		new Setting(containerEl)
-			.setName("Library folder")
-			.setDesc(
-				"The GoodNodes library (Documents) shows this vault folder and its subfolders; new notebooks and imports go here. Empty = whole vault.",
-			)
-			.addText((t) =>
-				t
-					.setPlaceholder("GoodNodes")
-					.setValue(s.libraryFolder)
-					.onChange((v) => ((s.libraryFolder = v.trim()), save())),
 			);
 
 		new Setting(containerEl).setName("Troubleshooting").setHeading();

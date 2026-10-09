@@ -27,6 +27,7 @@ import { CanvasImages, type StoredFile } from "./images";
 import { PenPopover, type PenChoice } from "./penPopover";
 import { debrandExcalidraw } from "./debrand";
 import { GoodNodesHelpModal } from "../help";
+import { insertPdfIntoCanvas } from "./insertPdf";
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
@@ -263,6 +264,7 @@ export class CanvasView extends TextFileView {
 					background={this.background}
 					onBackground={(b) => this.setBackground(b)}
 					onHelp={() => new GoodNodesHelpModal(this.app).open()}
+					onInsertPdf={() => this.api && void insertPdfIntoCanvas(this.app, this.api)}
 					onLibraryChange={(items) => this.saveLibrary(items)}
 					onApi={(api) => {
 						if (mountId === this.mountId) this.onApi(api, file);
@@ -459,6 +461,16 @@ const SIZES: { size: number; label: string }[] = [
 	{ size: 40, label: "L" },
 ];
 
+function PdfIcon() {
+	return (
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5">
+			<path d="M5 2.5h6.5L15.5 6.5v11H5z" strokeLinejoin="round" />
+			<path d="M11.5 2.5v4h4" strokeLinejoin="round" />
+			<path d="M10.25 9.5v5M7.75 12l2.5 2.5 2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
 function BackgroundIcon({ kind }: { kind: BackgroundKind }) {
 	return (
 		<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -480,6 +492,7 @@ function CanvasApp(props: {
 	background: BackgroundSettings;
 	onBackground: (b: BackgroundSettings) => void;
 	onHelp: () => void;
+	onInsertPdf: () => void;
 	onLibraryChange: (items: LibraryItems) => void;
 	onApi: (api: ExcalidrawImperativeAPI) => void;
 }) {
@@ -511,42 +524,52 @@ function CanvasApp(props: {
 				},
 			}}
 			renderTopRightUI={() => (
-				<div className="goodnodes-bg-picker">
+				<div className="goodnodes-top-right">
 					<button
 						className="goodnodes-bg-button"
-						title="Paper background"
-						aria-label="Paper background"
-						onClick={() => setOpen(!open)}
+						title="Insert PDF"
+						aria-label="Insert PDF"
+						onClick={props.onInsertPdf}
 					>
-						<BackgroundIcon kind={background.kind} />
+						<PdfIcon />
 					</button>
-					{open && (
-						<div className="goodnodes-bg-menu">
-							{BACKGROUNDS.map((b) => (
-								<button
-									key={b.kind}
-									className={b.kind === background.kind ? "is-active" : ""}
-									onClick={() => update({ kind: b.kind })}
-								>
-									<BackgroundIcon kind={b.kind} /> {b.label}
-								</button>
-							))}
-							{background.kind !== "blank" && (
-								<div className="goodnodes-bg-sizes">
-									{SIZES.map((s) => (
-										<button
-											key={s.size}
-											className={s.size === background.size ? "is-active" : ""}
-											title={`Spacing ${s.size}`}
-											onClick={() => update({ size: s.size })}
-										>
-											{s.label}
-										</button>
-									))}
-								</div>
-							)}
-						</div>
-					)}
+					<div className="goodnodes-bg-picker">
+						<button
+							className="goodnodes-bg-button"
+							title="Paper background"
+							aria-label="Paper background"
+							onClick={() => setOpen(!open)}
+						>
+							<BackgroundIcon kind={background.kind} />
+						</button>
+						{open && (
+							<div className="goodnodes-bg-menu">
+								{BACKGROUNDS.map((b) => (
+									<button
+										key={b.kind}
+										className={b.kind === background.kind ? "is-active" : ""}
+										onClick={() => update({ kind: b.kind })}
+									>
+										<BackgroundIcon kind={b.kind} /> {b.label}
+									</button>
+								))}
+								{background.kind !== "blank" && (
+									<div className="goodnodes-bg-sizes">
+										{SIZES.map((s) => (
+											<button
+												key={s.size}
+												className={s.size === background.size ? "is-active" : ""}
+												title={`Spacing ${s.size}`}
+												onClick={() => update({ size: s.size })}
+											>
+												{s.label}
+											</button>
+										))}
+									</div>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 			)}
 		>
@@ -554,6 +577,7 @@ function CanvasApp(props: {
 			<MainMenu>
 				<MainMenu.DefaultItems.SaveAsImage />
 				<MainMenu.DefaultItems.SearchMenu />
+				<MainMenu.Item onSelect={props.onInsertPdf}>Insert PDF…</MainMenu.Item>
 				<MainMenu.Item onSelect={props.onHelp}>GoodNodes help</MainMenu.Item>
 				<MainMenu.Separator />
 				<MainMenu.DefaultItems.ClearCanvas />

@@ -179,3 +179,8 @@
 .goodnodes-canvas-host .library-menu-browse-button {
 	display: none !important;
 }
+.goodnodes-top-right {
+	display: flex;
+	gap: 6px;
+	align-items: flex-start;
+}

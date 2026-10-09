@@ -21,15 +21,22 @@ export class GoodNodesHelpModal extends Modal {
 			"Tap the pen once to select it, tap it again to choose color and width.",
 			"Scribble firmly back and forth over handwriting to erase it (scratch out). Undo brings it back.",
 		]);
-		section("Canvas notebooks", [
-			"Text, shapes, arrows and images are in the top toolbar.",
-			"The paper button (top right) switches between blank, grid and dots.",
-			"Library: select something on the canvas, then choose “Add to library” to reuse it in any notebook.",
+		section("Create (right-click a folder, long-press on iPad)", [
+			"New GoodNodes notebook: pages with a cover and paper (blank, ruled, grid, dots).",
+			"New GoodNodes whiteboard: an infinite canvas for mind maps, text, shapes and images.",
+			"New text document: a normal Obsidian note.",
+			"Import into GoodNodes here: copy PDFs or images from Files into the folder.",
 		]);
-		section("PDF notebooks", [
-			"Open the GoodNodes library (ribbon) and tap “Import PDF”, or tap a PDF in the library.",
+		section("Whiteboards", [
+			"Text, shapes, arrows and images are in the top toolbar; the paper button switches blank, grid and dots.",
+			"Insert PDF (button top right, or ☰): its pages are placed on the board as images you can write on.",
+			"Library: select something, choose “Add to library”, and reuse it in any whiteboard.",
+		]);
+		section("Notebooks and PDFs", [
+			"Right-click a PDF → Open as GoodNodes notebook (or turn on “Open PDFs in GoodNodes” in settings).",
+			"“…” menu: add, insert or delete pages, insert the pages of another PDF, export with your notes.",
 			"Pages sidebar: thumbnails, outline and bookmarks. Drag the bar on the right edge to scrub through pages.",
-			"Your notes are stored next to the PDF (“…pdf.goodnodes.json”); the PDF itself is never changed. Export via “…”.",
+			"Notes are stored next to the PDF (“…pdf.goodnodes.json”); an imported PDF itself only changes when you add or delete pages.",
 		]);
 		contentEl.createEl("p", {
 			cls: "goodnodes-help-footer",
