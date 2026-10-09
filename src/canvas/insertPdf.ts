@@ -1,9 +1,10 @@
-import { App, FuzzySuggestModal, Modal, Notice, Setting, TFile, loadPdfJs } from "obsidian";
+import { App, FuzzySuggestModal, Modal, Notice, Setting, TFile } from "obsidian";
 import { CaptureUpdateAction, convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import type { BinaryFileData, DataURL, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { FileId } from "@excalidraw/excalidraw/element/types";
 import { debug } from "../debug";
 import { isPdf, pickFiles } from "../files";
+import { openPdf } from "../pdf/pdfjs";
 
 // "Insert PDF" on a whiteboard: every chosen page becomes an image on the canvas,
 // stacked top to bottom at the current view. The page images are then stored in
@@ -25,8 +26,7 @@ interface PdfSource {
 export async function insertPdfIntoCanvas(app: App, api: ExcalidrawImperativeAPI): Promise<void> {
 	const source = await choosePdf(app);
 	if (!source) return;
-	const pdfjs = await loadPdfJs();
-	const doc = await pdfjs.getDocument({ data: new Uint8Array(source.bytes) }).promise;
+	const doc = await openPdf(source.bytes);
 	try {
 		const total: number = doc.numPages;
 		const range = total > ASK_RANGE_ABOVE ? await askRange(app, source.name, total) : [1, total];

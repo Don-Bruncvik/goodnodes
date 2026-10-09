@@ -23,8 +23,11 @@
 .goodnodes-pdf-sidebar-content::-webkit-scrollbar {
 	display: none;
 }
-.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-scroll {
-	left: 0;
+/* Wide view: the pages sidebar pushes the pages aside (they refit) instead of covering them. */
+@container (min-width: 900px) {
+	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-scroll {
+		left: 320px;
+	}
 }
 .goodnodes-pdf-pages {
 	display: flex;
@@ -36,6 +39,20 @@
 	min-width: 100%;
 	box-sizing: border-box;
 	transform-origin: center top;
+}
+.goodnodes-pdf-root.is-horizontal .goodnodes-pdf-pages {
+	flex-direction: row;
+	align-items: center;
+	min-height: 100%;
+	width: max-content;
+}
+.goodnodes-pdf-scroll.is-snapping {
+	scroll-snap-type: x mandatory;
+}
+.goodnodes-pdf-scroll.is-snapping .goodnodes-pdf-page,
+.goodnodes-pdf-scroll.is-snapping .goodnodes-pdf-add-page {
+	scroll-snap-align: center;
+	scroll-snap-stop: always;
 }
 .goodnodes-pdf-page {
 	position: relative;
@@ -72,8 +89,7 @@
 	pointer-events: none;
 }
 
-.goodnodes-pdf-toolbar,
-.goodnodes-pdf-history {
+.goodnodes-pdf-toolbar {
 	position: absolute;
 	z-index: 12;
 	display: flex;
@@ -92,12 +108,10 @@
 	transform: translateX(-50%);
 	white-space: nowrap;
 }
-.goodnodes-pdf-history {
-	top: 62px;
-	left: 10px;
+.goodnodes-pdf-history-group {
+	display: contents;
 }
 .goodnodes-pdf-toolbar button,
-.goodnodes-pdf-history button,
 .goodnodes-pdf-sidebar button {
 	position: relative;
 	display: inline-flex;
@@ -115,7 +129,6 @@
 	color: var(--text-normal);
 }
 .goodnodes-pdf-toolbar button:hover,
-.goodnodes-pdf-history button:hover,
 .goodnodes-pdf-sidebar button:hover {
 	background: var(--background-modifier-hover);
 }
@@ -124,12 +137,10 @@
 	background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 	color: var(--interactive-accent);
 }
-.goodnodes-pdf-toolbar button:disabled,
-.goodnodes-pdf-history button:disabled {
+.goodnodes-pdf-toolbar button:disabled {
 	opacity: 0.4;
 }
 .goodnodes-pdf-toolbar svg,
-.goodnodes-pdf-history svg,
 .goodnodes-pdf-sidebar svg {
 	width: 19px;
 	height: 19px;
@@ -472,12 +483,6 @@
 }
 .goodnodes-pdf-thumbnail .goodnodes-pdf-thumbnail-bookmark.is-bookmarked svg {
 	fill: currentColor;
-}
-/* Undo/redo move along with the pages when the sidebar pushes them aside. */
-@container (min-width: 900px) {
-	.goodnodes-pdf-root.has-sidebar .goodnodes-pdf-history {
-		left: 332px;
-	}
 }
 
 /* Colors: 6 per row so the custom picker sits with the presets. */

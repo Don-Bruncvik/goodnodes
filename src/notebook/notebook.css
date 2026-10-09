@@ -49,17 +49,20 @@
 	content: "";
 	transform: rotate(-45deg);
 }
-.goodnodes-notebook-swatch.is-selected,
-.goodnodes-notebook-template.is-selected,
-.goodnodes-notebook-segments button.is-selected {
+.goodnodes-notebook-swatch.is-selected {
 	outline: 2px solid var(--interactive-accent);
 	outline-offset: 2px;
+}
+/* Inside the tile: an outside ring ran into the neighbouring tiles. */
+.goodnodes-notebook-modal button.goodnodes-notebook-template.is-selected {
+	box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 .goodnodes-notebook-templates {
 	flex-wrap: wrap;
 }
 .goodnodes-notebook-template {
 	display: flex;
+	border-radius: 10px;
 	width: 66px;
 	height: 94px;
 	flex-direction: column;
@@ -87,11 +90,28 @@
 	justify-content: space-between;
 	gap: 10px;
 }
+/* iOS-style segmented control: one rounded track, the chosen option is a raised chip. */
 .goodnodes-notebook-segments {
-	gap: 0;
+	gap: 2px;
+	padding: 3px;
+	border-radius: 11px;
+	background: var(--background-modifier-hover);
 }
-.goodnodes-notebook-segments button {
+.goodnodes-notebook-modal .goodnodes-notebook-segments button:not(.clickable-icon) {
+	min-width: 92px;
+	min-height: 38px;
 	padding: 0 14px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+}
+.goodnodes-notebook-modal .goodnodes-notebook-segments button.is-selected:not(.clickable-icon) {
+	background: var(--background-primary);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+	color: var(--text-normal);
+	font-weight: 600;
 }
 .goodnodes-notebook-pages-count {
 	min-width: 32px;
@@ -117,4 +137,7 @@
 .goodnodes-notebook-modal button.goodnodes-notebook-swatch {
 	background: var(--cover-color, var(--background-secondary)) !important;
 	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15) !important;
+	/* Obsidian mobile turns buttons into squircles (corner-shape); swatches are circles. */
+	border-radius: 50% !important;
+	corner-shape: round !important;
 }

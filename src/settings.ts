@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type GoodNodesPlugin from "./main";
+import { PDF_VIEW_TYPE, PdfNotebookView } from "./pdf/PdfView";
 
 export interface GoodNodesSettings {
 	// Last used tool settings, chosen in the pen popover (tap the active pen) and
@@ -29,6 +30,7 @@ export interface GoodNodesSettings {
 	palmMaxTouchSize: number;
 	/** Open PDFs in GoodNodes when tapped in the file list (instead of Obsidian's viewer). Needs reload. */
 	openPdfByDefault: boolean;
+	pdfPageDirection: "horizontal" | "vertical";
 	/** Folder for images pasted into canvases; empty = Obsidian's attachment setting. */
 	imageFolder: string;
 	showDebugRibbon: boolean;
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	scratchText: true,
 	palmMaxTouchSize: 0,
 	openPdfByDefault: false,
+	pdfPageDirection: "horizontal",
 	imageFolder: "",
 	showDebugRibbon: false,
 	library: [],
@@ -119,6 +122,21 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 			.addToggle((t) => t.setValue(s.scratchText).onChange((v) => ((s.scratchText = v), save())));
 
 		new Setting(containerEl).setName("Files").setHeading();
+		new Setting(containerEl)
+			.setName("Page turning")
+			.setDesc("Choose how pages are arranged in the GoodNodes PDF view.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("horizontal", "Horizontal, like a book")
+					.addOption("vertical", "Vertical scrolling")
+					.setValue(s.pdfPageDirection)
+					.onChange((value) => {
+						s.pdfPageDirection = value as "horizontal" | "vertical";
+						void this.plugin.saveSettings();
+						for (const leaf of this.app.workspace.getLeavesOfType(PDF_VIEW_TYPE))
+							(leaf.view as PdfNotebookView).applyPageDirection();
+					}),
+			);
 		new Setting(containerEl)
 			.setName("Open PDFs in GoodNodes")
 			.setDesc(

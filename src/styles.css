@@ -71,14 +71,16 @@
 
 /* ---------- Obsidian mobile ---------- */
 /* Obsidian mobile pads every button 20px left/right; in our 40px icon buttons that
-   squeezed the icons to 0 width (the empty toolbar on the iPad). */
-.goodnodes-pdf-root button,
-.goodnodes-pdf-popover button,
-.goodnodes-pen-popover button,
-.goodnodes-canvas-host .goodnodes-bg-button,
-.goodnodes-bg-menu button,
-.goodnodes-notebook-modal button.goodnodes-notebook-swatch,
-.goodnodes-notebook-modal button.goodnodes-notebook-template {
+   squeezed the icons, color swatches and width samples to 0 width (the empty toolbar
+   and the "thin lines" pen popover on the iPad). Its rule is
+   `.is-tablet button:not(.clickable-icon)`, so ours needs the same `:not()` to win. */
+.goodnodes-pdf-root button:not(.clickable-icon),
+.goodnodes-pdf-popover button:not(.clickable-icon),
+.goodnodes-pen-popover button:not(.clickable-icon),
+.goodnodes-canvas-host .goodnodes-bg-button:not(.clickable-icon),
+.goodnodes-bg-menu button:not(.clickable-icon),
+.goodnodes-notebook-modal button.goodnodes-notebook-swatch:not(.clickable-icon),
+.goodnodes-notebook-modal button.goodnodes-notebook-template:not(.clickable-icon) {
 	padding-left: 0;
 	padding-right: 0;
 }
@@ -86,10 +88,18 @@
 .goodnodes-pdf-popover button svg,
 .goodnodes-pen-popover button svg,
 .goodnodes-canvas-host .goodnodes-bg-button svg,
-.goodnodes-bg-menu button svg {
+.goodnodes-bg-menu button svg,
+.goodnodes-pdf-swatch::after,
+.goodnodes-pdf-width-sample {
 	flex: none;
 }
-.goodnodes-bg-menu button {
+.goodnodes-bg-menu button:not(.clickable-icon) {
 	padding-left: 8px;
 	padding-right: 8px;
+}
+
+/* "New tab" screen: Obsidian mobile caps the actions box at 280px; with our four extra
+   actions the list overflowed downwards and started below the middle. */
+.workspace-leaf-content .empty-state-container:has(.goodnodes-empty-action) {
+	max-height: none;
 }

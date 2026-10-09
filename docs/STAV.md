@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.0)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.2)
 
 ## Výsledky spike M0
 
@@ -30,6 +30,15 @@
 - Knižnica (domovská obrazovka) je preč, všetko ide cez menu priečinka v Obsidiane: New GoodNodes notebook, New GoodNodes whiteboard, New text document a Import into GoodNodes here (PDF aj obrázky).
 - Zošity: obálka, papier (prázdny, linajky, husté linajky, štvorčeky, bodky), A4 alebo Letter, na výšku alebo na šírku. Pridávanie, vkladanie a mazanie strán, vloženie strán iného PDF do zošita.
 - Whiteboard: Insert PDF vloží strany PDF ako obrázky.
+
+**0.4.2:**
+- PDF z GoodNotes (aj s poznámkami) sa vykresľuje celé, rovnako ako v Preview. pdf.js teraz dostáva rovnaké doplnky ako vstavaný prehliadač Obsidianu (dekodér JPEG 2000, CMapy, štandardné fonty, ICC). Bez nich ostali obrázky strán biele.
+- Strany sa listujú vodorovne ako v knihe a pri prispôsobenej veľkosti zaskočia na celú ďalšiu stranu. Pri priblížení sa zaskakovanie vypne a dá sa voľne posúvať. Zvislé posúvanie sa dá zapnúť v nastaveniach („Page turning“). Šípky, PageUp/PageDown a koliesko myši otáčajú strany.
+- Bočný panel so stranami na širokej obrazovke (od 900 px) strany nezakrýva, ale odsunie ich doprava.
+- iPad: farby a hrúbky v nastavení pera sú vidieť a dajú sa vybrať. Pravidlo Obsidianu `.is-tablet button:not(.clickable-icon)` prebíjalo náš reset okrajov tlačidiel z 0.4.1.
+- Späť a vpred sú v hlavnom paneli nástrojov, už neprekrývajú stranu. Pri vodorovnom listovaní je vidno len aktuálnu stranu.
+- Okno nového zošita: A4/Letter a Portrait/Landscape sú segmentový prepínač ako v iOS (predtým sa prekrývali), farby obálky sú kruhy.
+- Obrazovka „New tab“ na iPade: tlačidlá sú opäť vycentrované. Obsidian obmedzoval ich kontajner na 280 px.
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 

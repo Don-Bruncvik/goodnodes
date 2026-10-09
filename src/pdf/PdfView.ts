@@ -16,6 +16,7 @@ import { findScratchedStrokes } from "../scratch/detect";
 import type GoodNodesPlugin from "../main";
 import { debug } from "../debug";
 import { createAnnotatedPdf } from "./export";
+import { openPdf } from "./pdfjs";
 import { displayedToUnrotated, unrotatedToDisplayed } from "./coordinates";
 import { findEraserHits } from "./eraser";
 import { PdfHistory } from "./history";
@@ -107,7 +108,7 @@ export class PdfNotebookView extends FileView {
 	private scroller: HTMLElement;
 	private pagesEl: HTMLElement;
 	private toolbar: HTMLElement;
-	private historyToolbar: HTMLElement;
+	private historyToolbar!: HTMLElement;
 	private indicator: HTMLElement;
 	private sidebar: HTMLElement | null = null;
 	private sidebarContent: HTMLElement | null = null;
@@ -159,6 +160,7 @@ export class PdfNotebookView extends FileView {
 	private revision = 0;
 	private loadingSidecar = false;
 	private currentPage = 0;
+	private lastWheelTurn = 0;
 	private notebookMeta?: NotebookMeta;
 	private ownPdfWrite = false;
 	private pdfSignature = "";
@@ -186,6 +188,7 @@ export class PdfNotebookView extends FileView {
 			width: plugin.settings.penWidth,
 		};
 		this.contentEl.addClass("goodnodes-pdf-root");
+		this.contentEl.toggleClass("is-horizontal", this.horizontal);
 		this.scroller = this.contentEl.createDiv({ cls: "goodnodes-pdf-scroll" });
 		// Obsidian doesn't call onResize for every size change (window resize, iPad rotation,
 		// split view, our own sidebar), so watch the scroller directly.
@@ -193,7 +196,6 @@ export class PdfNotebookView extends FileView {
 		resizeObserver.observe(this.scroller);
 		this.register(() => resizeObserver.disconnect());
 		this.pagesEl = this.scroller.createDiv({ cls: "goodnodes-pdf-pages" });
-		this.historyToolbar = this.contentEl.createDiv({ cls: "goodnodes-pdf-history" });
 		this.toolbar = this.contentEl.createDiv({ cls: "goodnodes-pdf-toolbar" });
 		this.indicator = this.contentEl.createDiv({ cls: "goodnodes-pdf-indicator", text: "— / —" });
 		this.scrubber = this.contentEl.createDiv({ cls: "goodnodes-pdf-scrubber" });
@@ -223,6 +225,12 @@ export class PdfNotebookView extends FileView {
 				if ((e.ctrlKey || e.metaKey) && e.deltaY) {
 					e.preventDefault();
 					this.setZoom(this.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08), e.clientX, e.clientY);
+				} else if (this.horizontal && this.zoom <= 1 && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+					e.preventDefault();
+					if (Date.now() - this.lastWheelTurn >= 350) {
+						this.lastWheelTurn = Date.now();
+						this.jumpTo(this.currentPage + (e.deltaY > 0 ? 1 : -1));
+					}
 				}
 			},
 			{ passive: false },
@@ -282,7 +290,7 @@ export class PdfNotebookView extends FileView {
 			const data = await this.app.vault.readBinary(file);
 			this.pdfSignature = `${file.stat.size}:${file.stat.mtime}`;
 			if (stale()) return;
-			const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+			const doc = await openPdf(data, this.pdfjs);
 			if (stale()) {
 				void doc.destroy();
 				return;
@@ -323,8 +331,6 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private buildToolbar(): void {
-		this.iconButton(this.historyToolbar, "undo-2", "Undo", () => this.undo());
-		this.iconButton(this.historyToolbar, "redo-2", "Redo", () => this.redo());
 		this.iconButton(this.toolbar, "panel-left", "Pages sidebar", () => this.toggleSidebar());
 		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
 		this.toolButton("pen", "pen-line", "Pen");
@@ -336,6 +342,11 @@ export class PdfNotebookView extends FileView {
 		);
 		bookmark.dataset.action = "bookmark";
 		this.iconButton(this.toolbar, "more-horizontal", "More", (event?: MouseEvent) => this.showMore(event));
+		// Undo/redo live in the toolbar (like GoodNotes): a separate floating box covered the page.
+		this.toolbar.createDiv({ cls: "goodnodes-pdf-toolbar-separator" });
+		this.historyToolbar = this.toolbar.createDiv({ cls: "goodnodes-pdf-history-group" });
+		this.iconButton(this.historyToolbar, "undo-2", "Undo", () => this.undo());
+		this.iconButton(this.historyToolbar, "redo-2", "Redo", () => this.redo());
 		this.updateToolbar();
 	}
 
@@ -572,7 +583,79 @@ export class PdfNotebookView extends FileView {
 	private fitScale(): number {
 		// 16px page margins on each side plus a little slack so no horizontal scrollbar appears at zoom 1.
 		const availableWidth = Math.min(1100, Math.max(100, this.scroller.clientWidth - 40));
-		return Math.max(0.1, availableWidth / this.baseWidth);
+		const widthFit = availableWidth / this.baseWidth;
+		if (!this.horizontal) return Math.max(0.1, widthFit);
+		const heightFit = (this.scroller.clientHeight - 64 - 56) / this.baseHeight;
+		return Math.max(0.1, Math.min(widthFit, heightFit));
+	}
+
+	private get horizontal(): boolean {
+		return this.plugin.settings.pdfPageDirection === "horizontal";
+	}
+
+	private mainScroll(): number {
+		return this.horizontal ? this.scroller.scrollLeft : this.scroller.scrollTop;
+	}
+
+	private setMainScroll(value: number): void {
+		if (this.horizontal) this.scroller.scrollLeft = value;
+		else this.scroller.scrollTop = value;
+	}
+
+	private pageStart(slot: PageSlot): number {
+		return this.horizontal ? slot.el.offsetLeft : slot.el.offsetTop;
+	}
+
+	private pageLength(slot: PageSlot): number {
+		return this.horizontal ? slot.el.offsetWidth : slot.el.offsetHeight;
+	}
+
+	private viewLength(): number {
+		return this.horizontal ? this.scroller.clientWidth : this.scroller.clientHeight;
+	}
+
+	private maxMainScroll(): number {
+		return Math.max(
+			0,
+			this.horizontal
+				? this.scroller.scrollWidth - this.scroller.clientWidth
+				: this.scroller.scrollHeight - this.scroller.clientHeight,
+		);
+	}
+
+	private updatePagePadding(): void {
+		if (!this.horizontal || !this.slots.length) {
+			this.pagesEl.style.paddingLeft = "";
+			this.pagesEl.style.paddingRight = "";
+			this.pagesEl.style.columnGap = "";
+			return;
+		}
+		// Like a book: at fit zoom the neighbouring pages stay just off screen, so only
+		// the current page shows; zoomed in, a normal gap.
+		const pageWidth = this.baseWidth * this.pageScale * this.zoom;
+		const gap = this.zoom <= 1.001 ? Math.max(24, (this.scroller.clientWidth - pageWidth) / 2 + 12) : 24;
+		this.pagesEl.style.columnGap = `${gap}px`;
+		const firstPadding = Math.max(16, (this.scroller.clientWidth - this.slots[0].el.offsetWidth) / 2);
+		const last = this.slots[this.slots.length - 1];
+		const lastPadding = Math.max(16, (this.scroller.clientWidth - last.el.offsetWidth) / 2);
+		this.pagesEl.style.paddingLeft = `${firstPadding}px`;
+		this.pagesEl.style.paddingRight = `${lastPadding}px`;
+	}
+
+	private updateSnapping(): void {
+		this.scroller.toggleClass(
+			"is-snapping",
+			this.horizontal && this.zoom <= 1.001 && !this.pinch && !this.scrubberDragging,
+		);
+	}
+
+	private centerPage(index: number): void {
+		const slot = this.slots[index];
+		if (!slot) return;
+		this.scroller.scrollLeft = Math.max(
+			0,
+			slot.el.offsetLeft - (this.scroller.clientWidth - slot.el.offsetWidth) / 2,
+		);
 	}
 
 	private buildSlots(): void {
@@ -594,9 +677,11 @@ export class PdfNotebookView extends FileView {
 			});
 		}
 		const addTile = this.pagesEl.createEl("button", { cls: "goodnodes-pdf-add-page", text: "+ Add page" });
-		addTile.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
-		addTile.style.height = `${this.baseHeight * this.pageScale * this.zoom * 0.3}px`;
+		addTile.style.width = `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`;
+		addTile.style.height = `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`;
 		addTile.onclick = () => void this.insertBlankPage(this.slots.length);
+		this.updatePagePadding();
+		this.updateSnapping();
 	}
 
 	private observe(): void {
@@ -610,7 +695,12 @@ export class PdfNotebookView extends FileView {
 				}
 				this.scheduleUpdate();
 			},
-			{ root: this.scroller, rootMargin: `${Math.max(500, this.scroller.clientHeight)}px 0px` },
+			{
+				root: this.scroller,
+				rootMargin: this.horizontal
+					? `0px ${Math.max(500, this.scroller.clientWidth)}px`
+					: `${Math.max(500, this.scroller.clientHeight)}px 0px`,
+			},
 		);
 		for (const slot of this.slots) this.observer.observe(slot.el);
 	}
@@ -627,12 +717,18 @@ export class PdfNotebookView extends FileView {
 		if (!this.doc || !this.slots.length) return;
 		// Hidden, detached or not yet laid out: positions are meaningless (would "jump" to a
 		// wrong page and save it), and a pending restore must win.
-		if (!this.scroller.isConnected || this.scroller.clientHeight === 0 || this.pendingRestore !== null) return;
-		const center = this.scroller.scrollTop + this.scroller.clientHeight / 2;
+		if (
+			!this.scroller.isConnected ||
+			this.scroller.clientWidth === 0 ||
+			this.scroller.clientHeight === 0 ||
+			this.pendingRestore !== null
+		)
+			return;
+		const center = this.mainScroll() + this.viewLength() / 2;
 		let current = 0,
 			best = Infinity;
 		this.slots.forEach((slot, i) => {
-			const distance = Math.abs(slot.el.offsetTop + slot.el.offsetHeight / 2 - center);
+			const distance = Math.abs(this.pageStart(slot) + this.pageLength(slot) / 2 - center);
 			if (distance < best) {
 				best = distance;
 				current = i;
@@ -691,6 +787,7 @@ export class PdfNotebookView extends FileView {
 				slot.height = raw.height;
 				slot.el.style.width = `${raw.width * this.pageScale * this.zoom}px`;
 				slot.el.style.height = `${raw.height * this.pageScale * this.zoom}px`;
+				this.updatePagePadding();
 				this.restoreAnchor(anchor);
 			}
 			const scale = this.pageScale * this.zoom;
@@ -792,15 +889,15 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private topAnchor(): { index: number; offset: number } {
-		const y = this.scroller.scrollTop;
-		let index = this.slots.findIndex((slot) => slot.el.offsetTop + slot.el.offsetHeight >= y);
+		const position = this.mainScroll();
+		let index = this.slots.findIndex((slot) => this.pageStart(slot) + this.pageLength(slot) >= position);
 		if (index < 0) index = 0;
-		return { index, offset: y - this.slots[index].el.offsetTop };
+		return { index, offset: position - this.pageStart(this.slots[index]) };
 	}
 
 	private restoreAnchor(anchor: { index: number; offset: number }): void {
 		const slot = this.slots[anchor.index];
-		if (slot) this.scroller.scrollTop = slot.el.offsetTop + anchor.offset;
+		if (slot) this.setMainScroll(this.pageStart(slot) + anchor.offset);
 	}
 
 	private setZoom(value: number, clientX?: number, clientY?: number): void {
@@ -811,8 +908,8 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private updateScrubber(): void {
-		const max = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-		const fraction = this.scroller.scrollTop / max;
+		const max = Math.max(1, this.maxMainScroll());
+		const fraction = this.mainScroll() / max;
 		const available = Math.max(0, this.scrubber.clientHeight - this.scrubberThumb.offsetHeight);
 		const offset = fraction * available;
 		this.scrubberThumb.style.transform = `translateY(${offset}px)`;
@@ -835,6 +932,7 @@ export class PdfNotebookView extends FileView {
 		this.scrubberPointer = event.pointerId;
 		this.scrubber.setPointerCapture(event.pointerId);
 		this.scrubberDragging = true;
+		this.updateSnapping();
 		this.scrubber.addClass("is-visible");
 		this.scrubberPendingY = event.clientY;
 		this.applyScrubberPosition(event.clientY);
@@ -854,7 +952,12 @@ export class PdfNotebookView extends FileView {
 	private applyScrubberPosition(clientY: number): void {
 		const rect = this.scrubber.getBoundingClientRect();
 		const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-		this.scroller.scrollTop = ratio * (this.scroller.scrollHeight - this.scroller.clientHeight);
+		if (this.horizontal) {
+			const index = Math.min(this.slots.length - 1, Math.floor(ratio * this.slots.length));
+			this.centerPage(index);
+		} else {
+			this.setMainScroll(ratio * this.maxMainScroll());
+		}
 		this.scrubberBubble.setText(`Page ${this.currentPage + 1} / ${this.slots.length}`);
 	}
 
@@ -862,12 +965,14 @@ export class PdfNotebookView extends FileView {
 		if (!this.scrubberDragging || event.pointerId !== this.scrubberPointer) return;
 		this.scrubberDragging = false;
 		this.scrubberPointer = 0;
+		this.updateSnapping();
 		this.showScrubber();
 	}
 
 	/** Pages fit the view width at zoom 1; refit when the view is resized (rotation, sidebars). */
 	onResize(): void {
 		if (!this.doc || !this.slots.length || this.scroller.clientWidth === 0) return;
+		this.updateSnapping();
 		const next = this.fitScale();
 		if (Math.abs(next - this.pageScale) >= 0.001) {
 			if (this.pendingRestore !== null) {
@@ -881,7 +986,9 @@ export class PdfNotebookView extends FileView {
 				this.relayout(() => (this.pageScale = next));
 			}
 			this.updateAddPageTile();
+			this.updatePagePadding();
 		}
+		this.updatePagePadding();
 		this.applyPendingRestore();
 	}
 
@@ -892,13 +999,19 @@ export class PdfNotebookView extends FileView {
 		const screenY = clientY ?? rect.top + this.scroller.clientHeight / 2;
 		const anchor = this.zoomAnchor(screenX, screenY);
 		change();
+		this.updateSnapping();
 		this.releaseAll();
 		for (const slot of this.slots) {
 			slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
 		}
 		this.updateAddPageTile();
+		this.updatePagePadding();
 		this.applyZoomAnchor(anchor, screenX, screenY);
+		if (this.horizontal && this.zoom <= 1.001) {
+			this.centerPage(anchor.page);
+			this.scroller.scrollTop = 0;
+		}
 		this.scheduleUpdate();
 	}
 
@@ -927,8 +1040,8 @@ export class PdfNotebookView extends FileView {
 	private updateAddPageTile(): void {
 		const tile = this.pagesEl.querySelector<HTMLElement>(".goodnodes-pdf-add-page");
 		if (!tile) return;
-		tile.style.width = `${this.baseWidth * this.pageScale * this.zoom}px`;
-		tile.style.height = `${this.baseHeight * this.pageScale * this.zoom * 0.3}px`;
+		tile.style.width = `${this.baseWidth * this.pageScale * this.zoom * (this.horizontal ? 0.3 : 1)}px`;
+		tile.style.height = `${this.baseHeight * this.pageScale * this.zoom * (this.horizontal ? 1 : 0.3)}px`;
 	}
 
 	private pointerDown(event: PointerEvent): void {
@@ -1189,6 +1302,7 @@ export class PdfNotebookView extends FileView {
 			anchor,
 			visualScale: 1,
 		};
+		this.updateSnapping();
 		this.pagesEl.style.transformOrigin = `${centerX - pagesRect.left}px ${centerY - pagesRect.top}px`;
 	}
 
@@ -1219,8 +1333,14 @@ export class PdfNotebookView extends FileView {
 			slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
 		}
 		this.updateAddPageTile();
-		this.applyZoomAnchor(gesture.anchor, gesture.centerX, gesture.centerY);
 		this.pinch = null;
+		this.updatePagePadding();
+		this.updateSnapping();
+		this.applyZoomAnchor(gesture.anchor, gesture.centerX, gesture.centerY);
+		if (this.horizontal && this.zoom <= 1.001) {
+			this.centerPage(gesture.anchor.page);
+			this.scroller.scrollTop = 0;
+		}
 		this.markDirty();
 		this.scheduleUpdate();
 	}
@@ -1250,10 +1370,24 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private handleKeydown(event: KeyboardEvent): void {
-		if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-		event.preventDefault();
-		if (event.shiftKey) this.redo();
-		else this.undo();
+		const target = event.target as HTMLElement | null;
+		if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+		if (event.metaKey || event.ctrlKey || event.altKey) {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+				event.preventDefault();
+				if (event.shiftKey) this.redo();
+				else this.undo();
+			}
+			return;
+		}
+		if (event.shiftKey) return;
+		if (["ArrowRight", "PageDown", " "].includes(event.key)) {
+			event.preventDefault();
+			this.jumpTo(this.currentPage + 1);
+		} else if (["ArrowLeft", "PageUp"].includes(event.key)) {
+			event.preventDefault();
+			this.jumpTo(this.currentPage - 1);
+		}
 	}
 
 	private openPageModal(): void {
@@ -1265,9 +1399,40 @@ export class PdfNotebookView extends FileView {
 		if (index < 0 || index >= this.slots.length) return;
 		if (this.slots[index].canvas) debug.log(`Jump page ${index + 1} to first render 0.0 ms (already rendered)`);
 		else this.jumpStarted.set(index, performance.now());
-		this.scroller.scrollTop = this.slots[index].el.offsetTop;
+		if (this.horizontal) {
+			this.centerPage(index);
+			if (this.zoom <= 1.001) this.scroller.scrollTop = 0;
+		} else this.scroller.scrollTop = this.slots[index].el.offsetTop;
 		this.visible.add(index);
 		this.scheduleUpdate();
+	}
+
+	/** Rebuild the page axis after the setting changes, keeping the selected page in view. */
+	applyPageDirection(): void {
+		const page = this.currentPage;
+		this.contentEl.toggleClass("is-horizontal", this.horizontal);
+		if (this.doc && this.slots.length) {
+			this.observer?.disconnect();
+			this.observe();
+			this.pageScale = this.fitScale();
+			// Canvases were drawn at the old scale; they re-render at the new one.
+			this.releaseAll();
+			for (const slot of this.slots) {
+				slot.el.style.width = `${slot.width * this.pageScale * this.zoom}px`;
+				slot.el.style.height = `${slot.height * this.pageScale * this.zoom}px`;
+			}
+			this.updateAddPageTile();
+			this.updatePagePadding();
+			this.updateSnapping();
+			if (this.horizontal) {
+				this.centerPage(page);
+				if (this.zoom <= 1.001) this.scroller.scrollTop = 0;
+			} else {
+				this.scroller.scrollLeft = 0;
+				this.scroller.scrollTop = this.slots[page]?.el.offsetTop ?? 0;
+			}
+			this.scheduleUpdate();
+		}
 	}
 
 	private async loadOutline(): Promise<void> {
@@ -1848,7 +2013,7 @@ export class PdfNotebookView extends FileView {
 		await this.doc?.destroy?.();
 		this.doc = null;
 		const data = bytes.slice(0);
-		const doc = await this.pdfjs.getDocument({ data: new Uint8Array(data) }).promise;
+		const doc = await openPdf(data, this.pdfjs);
 		this.doc = doc;
 		const base = await typicalPageSize(doc);
 		this.baseWidth = base.width;
@@ -1871,10 +2036,19 @@ export class PdfNotebookView extends FileView {
 	}
 
 	private applyPendingRestore(): void {
-		if (this.pendingRestore === null || this.scroller.clientHeight === 0 || !this.slots.length) return;
+		if (
+			this.pendingRestore === null ||
+			this.scroller.clientHeight === 0 ||
+			this.scroller.clientWidth === 0 ||
+			!this.slots.length
+		)
+			return;
 		const index = this.pendingRestore;
 		this.pendingRestore = null;
-		this.scroller.scrollTop = this.slots[index].el.offsetTop;
+		if (this.horizontal) {
+			this.centerPage(index);
+			if (this.zoom <= 1.001) this.scroller.scrollTop = 0;
+		} else this.scroller.scrollTop = this.slots[index].el.offsetTop;
 		this.currentPage = index;
 		this.scheduleUpdate();
 	}
