@@ -31,6 +31,8 @@ export class PenPopover {
 		private host: HTMLElement,
 		private get: () => PenChoice,
 		private set: (choice: PenChoice) => void,
+		private getFinger: () => boolean,
+		private setFinger: (on: boolean) => void,
 	) {}
 
 	get isOpen(): boolean {
@@ -118,6 +120,17 @@ export class PenPopover {
 			b.toggleClass("is-active", w === width);
 			b.onclick = () => this.choose({ color, width: w });
 		}
+		const finger = el.createDiv({ cls: "goodnodes-finger-row" });
+		finger.createSpan({ text: "Draw with finger" });
+		const on = this.getFinger();
+		const toggle = finger.createEl("button", {
+			cls: `goodnodes-finger-switch${on ? " is-on" : ""}`,
+			attr: { role: "switch", "aria-checked": String(on), "aria-label": "Draw with finger" },
+		});
+		toggle.onclick = () => {
+			this.setFinger(!this.getFinger());
+			this.render();
+		};
 	}
 
 	private choose(choice: PenChoice, rerender = true): void {

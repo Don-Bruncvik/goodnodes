@@ -25,12 +25,14 @@ import { TouchGestures, type Viewport } from "./touch";
 import { handleFinishedStroke } from "./scratch";
 import { CanvasImages, type StoredFile } from "./images";
 import { PenPopover, type PenChoice } from "./penPopover";
+import { TextPopover, type TextChoice } from "./textPopover";
 import { debrandExcalidraw } from "./debrand";
 import { GoodNodesHelpModal } from "../help";
 import { insertPdfIntoCanvas } from "./insertPdf";
 
 export const CANVAS_VIEW_TYPE = "goodnodes-canvas";
 export const CANVAS_EXTENSION = "goodnodes";
+let applePencilSeen = false;
 
 /**
  * On-disk format of a .goodnodes file. `scene` is Excalidraw's own JSON export,
@@ -96,8 +98,11 @@ export class CanvasView extends TextFileView {
 	private mountId = 0;
 	private fileCount = 0;
 	private penPopover: PenPopover | null = null;
+	private textPopover: TextPopover | null = null;
 	private activeTool = "";
 	private savePenTimer = 0;
+	private textDrag: { id: number; start: { x: number; y: number }; current: { x: number; y: number } } | null = null;
+	private textPreview: HTMLElement | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -210,8 +215,8 @@ export class CanvasView extends TextFileView {
 			appState: {
 				...restored.appState,
 				viewBackgroundColor: "transparent",
-				penMode: true,
-				penDetected: true,
+				penMode: !this.fingersDraw(),
+				penDetected: !this.fingersDraw(),
 				// Opening a notebook should be ready to write.
 				activeTool: { type: "freedraw", customType: null, locked: false, lastActiveTool: null },
 				currentItemStrokeColor: this.plugin.settings.canvasPenColor,
@@ -232,6 +237,18 @@ export class CanvasView extends TextFileView {
 			host,
 			() => ({ color: this.plugin.settings.canvasPenColor, width: this.plugin.settings.canvasPenWidth }),
 			(choice) => this.setPen(choice),
+			() => this.fingersDraw(),
+			(on) => this.setFingerDrawing(on),
+		);
+		this.textPopover = new TextPopover(
+			host,
+			() => ({
+				color: this.plugin.settings.canvasTextColor,
+				size: this.plugin.settings.canvasTextSize,
+				font: this.plugin.settings.canvasTextFont,
+				align: this.plugin.settings.canvasTextAlign,
+			}),
+			(choice) => this.setText(choice),
 		);
 		// Tapping the pen while it is already the active tool opens the pen popover.
 		// Capture phase: runs before Excalidraw handles the click (and re-selects the tool).
@@ -245,7 +262,21 @@ export class CanvasView extends TextFileView {
 			},
 			true,
 		);
+		host.addEventListener(
+			"click",
+			(e) => {
+				const button = (e.target as Element | null)?.closest?.<HTMLElement>('[data-testid="toolbar-text"]');
+				if (!button) return;
+				if (this.api?.getAppState().activeTool.type === "text")
+					setTimeout(() => this.textPopover?.toggle(button), 0);
+			},
+			true,
+		);
 		this.hostEl = host;
+		host.addEventListener("pointerdown", this.onTextPointerDown, true);
+		host.addEventListener("pointermove", this.onTextPointerMove, true);
+		host.addEventListener("pointerup", this.onTextPointerUp, true);
+		host.addEventListener("pointercancel", this.onTextPointerUp, true);
 		this.bg = new BackgroundLayer(host, this.background, this.isDark());
 		this.bg.setViewport(this.viewport);
 		const excalidrawEl = host.createDiv({ cls: "goodnodes-canvas-excalidraw" });
@@ -253,6 +284,8 @@ export class CanvasView extends TextFileView {
 			getViewport: () => this.viewport,
 			setViewport: (v) => this.applyViewport(v),
 			maxTouchSize: () => this.plugin.settings.palmMaxTouchSize,
+			fingersDraw: () => this.fingersDraw(),
+			penDetected: () => this.onPenDetected(),
 		});
 
 		this.root = createRoot(excalidrawEl);
@@ -298,6 +331,10 @@ export class CanvasView extends TextFileView {
 
 	private unmount(): void {
 		this.penPopover?.close();
+		this.textPopover?.close();
+		this.textPopover = null;
+		this.textPreview?.remove();
+		this.textPreview = null;
 		this.penPopover = null;
 		for (const u of this.unsubs) u();
 		this.unsubs = [];
@@ -322,6 +359,7 @@ export class CanvasView extends TextFileView {
 			}),
 			api.onChange((elements, appState, files) => {
 				this.onToolChange(appState.activeTool.type);
+				if (this.hostEl) this.hostEl.dataset.editingText = appState.editingTextElement ? "1" : "";
 				if (this.loading) return;
 				if (this.currentVersion(elements) !== this.savedVersion) this.requestSave();
 				const count = Object.keys(files).length;
@@ -368,7 +406,170 @@ export class CanvasView extends TextFileView {
 		this.activeTool = tool;
 		if (this.hostEl) this.hostEl.dataset.tool = tool;
 		if (tool !== "freedraw") this.penPopover?.close();
-		else this.applyPen();
+		if (tool !== "text") this.textPopover?.close();
+		if (tool === "freedraw") this.applyPen();
+		if (tool === "text") this.applyText();
+	}
+
+	private fingersDraw(): boolean {
+		const setting = this.plugin.settings.canvasFingerDrawing;
+		return setting === "on" || (setting === "auto" && !applePencilSeen);
+	}
+
+	applyFingerSetting(): void {
+		const draw = this.fingersDraw();
+		this.api?.updateScene({
+			appState: { penMode: !draw, penDetected: !draw },
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
+	}
+
+	private onPenDetected(): void {
+		if (this.plugin.settings.canvasFingerDrawing !== "auto" || applePencilSeen) return;
+		applePencilSeen = true;
+		for (const leaf of this.app.workspace.getLeavesOfType(CANVAS_VIEW_TYPE))
+			(leaf.view as CanvasView).applyFingerSetting();
+	}
+
+	private setFingerDrawing(on: boolean): void {
+		this.plugin.settings.canvasFingerDrawing = on ? "on" : "off";
+		this.applyFingerSetting();
+		window.clearTimeout(this.savePenTimer);
+		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
+	}
+
+	private applyText(): void {
+		const s = this.plugin.settings;
+		this.api?.updateScene({
+			appState: {
+				currentItemStrokeColor: s.canvasTextColor,
+				currentItemFontSize: s.canvasTextSize,
+				currentItemFontFamily: s.canvasTextFont,
+				currentItemTextAlign: s.canvasTextAlign,
+			},
+			captureUpdate: CaptureUpdateAction.NEVER,
+		});
+	}
+
+	private setText(choice: TextChoice): void {
+		const s = this.plugin.settings;
+		s.canvasTextColor = choice.color;
+		s.canvasTextSize = choice.size;
+		s.canvasTextFont = choice.font;
+		s.canvasTextAlign = choice.align;
+		this.applyText();
+		const api = this.api;
+		if (api) {
+			const state = api.getAppState();
+			const selected = state.selectedElementIds;
+			const editingId = state.editingTextElement?.id;
+			let changed = false;
+			const elements = api.getSceneElementsIncludingDeleted().map((element) => {
+				if (element.type !== "text" || (!selected[element.id] && element.id !== editingId)) return element;
+				if (element.strokeColor === choice.color) return element;
+				changed = true;
+				// Excalidraw 0.18 doesn't export its text remeasurement helpers; existing text gets color only.
+				return { ...element, strokeColor: choice.color };
+			});
+			// Only a real change is an undo step.
+			if (changed) api.updateScene({ elements, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+		}
+		window.clearTimeout(this.savePenTimer);
+		this.savePenTimer = window.setTimeout(() => void this.plugin.saveSettings(), 300);
+	}
+
+	// Dragging with the text tool sizes the text box: the rectangle's height sets the font
+	// size (one line fills it), its width the wrap width. The pointer is NOT intercepted:
+	// Excalidraw opens its editor on pointerdown, inside the user's gesture, which is the
+	// only way iOS shows the keyboard. On release we resize the text being edited.
+	private onTextPointerDown = (event: PointerEvent): void => {
+		if (this.api?.getAppState().activeTool.type !== "text") return;
+		if (
+			event.pointerType !== "pen" &&
+			event.pointerType !== "mouse" &&
+			!(event.pointerType === "touch" && this.fingersDraw())
+		)
+			return;
+		const target = event.target as HTMLElement;
+		if (!(target instanceof HTMLCanvasElement) || !target.closest(".excalidraw")) return;
+		const point = this.scenePoint(event.clientX, event.clientY);
+		this.textDrag = { id: event.pointerId, start: point, current: point };
+	};
+
+	private onTextPointerMove = (event: PointerEvent): void => {
+		const drag = this.textDrag;
+		if (!drag || drag.id !== event.pointerId) return;
+		drag.current = this.scenePoint(event.clientX, event.clientY);
+		const host = this.hostEl;
+		if (!host || !this.isTextBoxDrag(drag)) return;
+		if (!this.textPreview) this.textPreview = host.createDiv({ cls: "goodnodes-text-box-preview" });
+		const rect = this.hostSceneRect(drag.start, drag.current);
+		const viewport = this.viewport;
+		this.textPreview.style.left = `${(rect.x + viewport.scrollX) * viewport.zoom}px`;
+		this.textPreview.style.top = `${(rect.y + viewport.scrollY) * viewport.zoom}px`;
+		this.textPreview.style.width = `${rect.width * viewport.zoom}px`;
+		this.textPreview.style.height = `${rect.height * viewport.zoom}px`;
+	};
+
+	private onTextPointerUp = (event: PointerEvent): void => {
+		const drag = this.textDrag;
+		if (!drag || drag.id !== event.pointerId) return;
+		this.textDrag = null;
+		this.textPreview?.remove();
+		this.textPreview = null;
+		drag.current = this.scenePoint(event.clientX, event.clientY);
+		if (!this.isTextBoxDrag(drag)) return;
+		const box = this.hostSceneRect(drag.start, drag.current);
+		// Excalidraw's line height for its fonts is ~1.25 (getLineHeight isn't exported in 0.18).
+		const fontSize = Math.min(400, Math.max(8, Math.round(box.height / 1.25)));
+		const api = this.api;
+		// Let Excalidraw finish its own pointerup first.
+		requestAnimationFrame(() => {
+			const editing = api?.getAppState().editingTextElement;
+			if (!api || this.api !== api || !editing) return;
+			const elements = api.getSceneElementsIncludingDeleted().map((element) =>
+				element.id === editing.id && element.type === "text"
+					? {
+							...element,
+							x: box.x,
+							y: box.y,
+							fontSize,
+							autoResize: false,
+							width: Math.max(fontSize, box.width),
+							height: fontSize * 1.25,
+						}
+					: element,
+			);
+			api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+		});
+	};
+
+	/** Movement under 10 screen px is a tap: Excalidraw's normal text at the tap point. */
+	private isTextBoxDrag(drag: { start: { x: number; y: number }; current: { x: number; y: number } }): boolean {
+		const zoom = this.viewport.zoom;
+		return (
+			Math.abs(drag.current.x - drag.start.x) * zoom >= 10 || Math.abs(drag.current.y - drag.start.y) * zoom >= 10
+		);
+	}
+
+	private scenePoint(clientX: number, clientY: number): { x: number; y: number } {
+		const rect = this.hostEl!.getBoundingClientRect();
+		return {
+			x: (clientX - rect.left) / this.viewport.zoom - this.viewport.scrollX,
+			y: (clientY - rect.top) / this.viewport.zoom - this.viewport.scrollY,
+		};
+	}
+
+	private hostSceneRect(
+		a: { x: number; y: number },
+		b: { x: number; y: number },
+	): { x: number; y: number; width: number; height: number } {
+		return {
+			x: Math.min(a.x, b.x),
+			y: Math.min(a.y, b.y),
+			width: Math.abs(a.x - b.x),
+			height: Math.abs(a.y - b.y),
+		};
 	}
 
 	private applyPen(): void {

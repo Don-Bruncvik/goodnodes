@@ -17,6 +17,11 @@ export interface GoodNodesSettings {
 	/** Canvas (Excalidraw) freedraw color and width. */
 	canvasPenColor: string;
 	canvasPenWidth: number;
+	canvasFingerDrawing: "auto" | "on" | "off";
+	canvasTextColor: string;
+	canvasTextSize: number;
+	canvasTextFont: number;
+	canvasTextAlign: "left" | "center" | "right";
 	/** Smooth strokes with perfect-freehand's streamline/smoothing. */
 	smoothing: boolean;
 	scratchEnabled: boolean;
@@ -46,6 +51,11 @@ export const DEFAULT_SETTINGS: GoodNodesSettings = {
 	eraserSize: 10,
 	canvasPenColor: "#1e1e1e",
 	canvasPenWidth: 2,
+	canvasFingerDrawing: "auto",
+	canvasTextColor: "#1e1e1e",
+	canvasTextSize: 20,
+	canvasTextFont: 5,
+	canvasTextAlign: "left",
 	smoothing: true,
 	scratchEnabled: true,
 	scratchMinReversals: 4,
@@ -78,6 +88,23 @@ export class GoodNodesSettingTab extends PluginSettingTab {
 			.setName("Smooth strokes")
 			.setDesc("Even out shaky lines while writing.")
 			.addToggle((t) => t.setValue(s.smoothing).onChange((v) => ((s.smoothing = v), save())));
+		new Setting(containerEl)
+			.setName("Draw with finger")
+			.setDesc("Choose whether fingers use the active canvas tool or pan and zoom.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("auto", "Automatic (until Apple Pencil is used)")
+					.addOption("on", "Always")
+					.addOption("off", "Never (fingers only scroll and zoom)")
+					.setValue(s.canvasFingerDrawing)
+					.onChange((value) => {
+						s.canvasFingerDrawing = value as GoodNodesSettings["canvasFingerDrawing"];
+						void this.plugin.saveSettings();
+						for (const leaf of this.app.workspace.getLeavesOfType("goodnodes-canvas"))
+							(leaf.view as unknown as { applyFingerSetting(): void }).applyFingerSetting();
+					}),
+			);
+
 		new Setting(containerEl)
 			.setName("Palm rejection: max finger size")
 			.setDesc(

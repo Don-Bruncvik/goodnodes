@@ -1,4 +1,4 @@
-# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.3)
+# GoodNodes: stav k 9. 10. 2026 (verzia 0.4.4)
 
 ## Výsledky spike M0
 
@@ -44,6 +44,19 @@
 - Pri listovaní ako v knihe je najmenší zoom celá strana a PDF sa vždy otvorí na celú výšku. Strany sa už nezoradia vedľa seba.
 - Zoom (pinch aj menu) nepreblikáva: strana ostane viditeľná, kým sa ostrá verzia nevykreslí na pozadí.
 - Bočný panel odsúva strany aj na iPade na výšku (užší, jeden stĺpec miniatúr). Panel nástrojov a číslo strany sa vycentrujú vo zvyšnom priestore. Ako prekrytie ostáva len na úzkych obrazovkách (pod 600 px).
+
+**0.4.4 (kontrola UI na iPade):** automatická kontrola všetkých obrazoviek, menu a dialógov v emulácii iPadu (na šírku aj na výšku): stlačené alebo prázdne tlačidlá, pretekajúci text, prekrývanie.
+- Opravené: tlačidlá Excalidrawu na whiteboarde (hlavné menu, More tools, zoom −/+, späť/vpred, pomocník) boli na iPade prázdne, rovnaký problém s okrajmi tlačidiel ako pri pere v 0.4.2.
+- Na výšku (mobilné rozloženie Excalidrawu) sa pri pere a texte skrýva tlačidlo „Edit“ v spodnej lište, rovnako ako ľavý panel na šírku.
+- Ukážky hrúbky pera v PDF sú rozlíšiteľné (najtenšia bola neviditeľná). Prepínač „Draw with finger“ už nepretŕča.
+
+**0.4.4 (PDF):**
+- Pri priblíženej strane v režime knihy: keď stranu potiahneš ďalej za jej okraj, preskočí na susednú stranu, zarovnanú na príslušný okraj, so zachovaným zoomom a výškou. Krátke potiahnutie stranu vráti na jej okraj (strana neostane napoly s medzerou).
+
+**0.4.4 (whiteboard):**
+- Prst funguje aj bez Apple Pencil. V automatickom režime prst kreslí, vyberá a píše, kým v danom spustení Obsidianu nepoužiješ ceruzku. Potom prst posúva a približuje. Nastavenie „Draw with finger“ (Automatic / Always / Never) a rýchly prepínač v menu pera.
+- Text má vlastné menu ako pero: klepni na už vybratý nástroj Text. Obsahuje farbu, veľkosť S/M/L/XL, písmo (Hand-drawn / Normal / Code) a zarovnanie. Ľavý panel Excalidrawu sa pri texte nezobrazuje. Text si pamätá vlastné nastavenia, oddelene od pera. Pri existujúcom texte sa z menu mení len farba, lebo Excalidraw 0.18 nevie text verejne premerať.
+- Potiahnutie nástrojom Text vytvorí textové pole: výška obdĺžnika určí veľkosť písma (jeden riadok ho vyplní) a šírka zalamovanie. Editor sa otvára priamo pri dotyku, aby iOS ukázal klávesnicu.
 
 **M3 a ostatné:** nastavenia (pero, citlivosť škrtania, dlaň, priečinok obrázkov, „otvárať PDF v GoodNodes“), ladiací panel, README, licencia MIT, verejný repozitár a automatické vydania (GitHub Actions) pre BRAT.
 

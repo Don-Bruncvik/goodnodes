@@ -22,6 +22,9 @@ export interface TouchGestureHost {
 	setViewport(v: Viewport): void;
 	/** Touches with a larger contact (CSS px) are a palm; 0 = no limit. */
 	maxTouchSize(): number;
+	/** When true, fingers belong to Excalidraw's active tool. */
+	fingersDraw(): boolean;
+	penDetected(): void;
 }
 
 const MIN_ZOOM = 0.1;
@@ -72,6 +75,7 @@ export class TouchGestures {
 		// Safari pinch events (Excalidraw listens to these for its own zoom).
 		for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
 			const fn = (e: Event) => {
+				if (this.host.fingersDraw()) return;
 				e.preventDefault();
 				e.stopPropagation();
 			};
@@ -106,7 +110,11 @@ export class TouchGestures {
 
 	private onPointerDown = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
-		if (e.pointerType === "pen") this.pens.add(e.pointerId);
+		if (e.pointerType === "pen") {
+			this.host.penDetected();
+			this.pens.add(e.pointerId);
+		}
+		if (this.host.fingersDraw()) return;
 		if (e.pointerType !== "touch" || !this.onSurface(e)) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -128,6 +136,7 @@ export class TouchGestures {
 
 	private onPointerMove = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
+		if (this.host.fingersDraw()) return;
 		if (e.pointerType !== "touch" || !this.owned.has(e.pointerId)) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -139,6 +148,12 @@ export class TouchGestures {
 	private onPointerUp = (e: PointerEvent) => {
 		debug.pointer("canvas", e);
 		if (e.pointerType === "pen" && this.pens.delete(e.pointerId)) this.penUpAt = performance.now();
+		if (this.host.fingersDraw()) {
+			this.owned.delete(e.pointerId);
+			this.touches.delete(e.pointerId);
+			this.resetBaseline();
+			return;
+		}
 		if (e.pointerType !== "touch" || !this.owned.delete(e.pointerId)) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -147,6 +162,7 @@ export class TouchGestures {
 	};
 
 	private onTouch = (e: TouchEvent) => {
+		if (this.host.fingersDraw()) return;
 		// A finger that started on the surface keeps its gesture even if it slides over UI.
 		if (e.type === "touchstart" && !this.onSurface(e)) return;
 		if (e.type !== "touchstart" && this.owned.size === 0) return;

@@ -1,7 +1,7 @@
 {
 	"id": "goodnodes",
 	"name": "GoodNodes",
-	"version": "0.4.3",
+	"version": "0.4.4",
 	"minAppVersion": "1.5.0",
 	"description": "Handwritten notebooks for Apple Pencil: infinite canvas and PDF notebooks. Pen draws, fingers pan and zoom.",
 	"author": "Don-Bruncvik",

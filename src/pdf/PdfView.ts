@@ -174,12 +174,27 @@ export class PdfNotebookView extends FileView {
 	private touchStart = (event: TouchEvent) => {
 		this.blockStylusTouch(event);
 		this.syncPinch(event);
+		this.fingersDown = event.touches.length;
+		// A new swipe: page turns are measured from the page it starts on.
+		if (event.touches.length === 1) {
+			this.turnAnchor = this.currentPage;
+			this.autoTurning = false;
+		}
 	};
 	private touchMove = (event: TouchEvent) => {
 		this.blockStylusTouch(event);
 		this.syncPinch(event);
 	};
-	private touchEnd = (event: TouchEvent) => this.syncPinch(event);
+	private touchEnd = (event: TouchEvent) => {
+		this.syncPinch(event);
+		this.fingersDown = event.touches.length;
+		if (event.touches.length === 0) this.settleZoomedPage(true);
+	};
+	/** Book mode, zoomed in: page the current swipe started on, fingers on the glass. */
+	private turnAnchor: number | null = null;
+	private fingersDown = 0;
+	private autoTurning = false;
+	private settleTimer: number | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: GoodNodesPlugin) {
 		super(leaf);
@@ -207,6 +222,13 @@ export class PdfNotebookView extends FileView {
 		this.registerDomEvent(this.scroller, "scroll", () => {
 			this.scheduleUpdate();
 			this.showScrubber();
+			if (this.turnAnchor === null) this.turnAnchor = this.currentPage;
+			// Momentum or trackpad scrolling: check once the scrolling has stopped.
+			if (this.settleTimer !== null) window.clearTimeout(this.settleTimer);
+			this.settleTimer = window.setTimeout(() => {
+				this.settleTimer = null;
+				if (this.fingersDown === 0) this.settleZoomedPage(false);
+			}, 140);
 		});
 		this.registerDomEvent(this.indicator, "click", () => this.openPageModal());
 		this.registerDomEvent(this.scrubber, "pointerdown", (e) => this.scrubberDown(e));
@@ -516,7 +538,9 @@ export class PdfNotebookView extends FileView {
 			const sample = button.createSpan({ cls: "goodnodes-pdf-width-sample" });
 			sample.style.setProperty(
 				"--goodnodes-sample-width",
-				`${Math.min(18, tool === "eraser" ? width : width * 2)}px`,
+				// 3px + 3× width: the thinnest pen was an invisible 1.6px dot, and every width
+				// must still look different.
+				`${Math.min(18, tool === "eraser" ? width : 3 + width * 3)}px`,
 			);
 			sample.style.setProperty(
 				"--goodnodes-tool-color",
@@ -654,6 +678,77 @@ export class PdfNotebookView extends FileView {
 			"is-snapping",
 			this.horizontal && this.zoom <= 1.001 && !this.pinch && !this.scrubberDragging,
 		);
+	}
+
+	/**
+	 * Book mode while zoomed in: pulling a page further than a short distance past its
+	 * edge turns to the neighbouring page (aligned at that edge, same zoom and height);
+	 * a shorter pull springs back, so a page never rests half off screen.
+	 * `released`: the finger just lifted (momentum may still follow).
+	 */
+	private settleZoomedPage(released: boolean): void {
+		if (!this.horizontal || this.zoom <= 1.001 || this.pinch || this.scrubberDragging || !this.slots.length) return;
+		if (this.autoTurning) {
+			// Our own smooth scroll has finished.
+			if (!released) {
+				this.autoTurning = false;
+				this.turnAnchor = null;
+			}
+			return;
+		}
+		const view = this.scroller.clientWidth;
+		const viewLeft = this.scroller.scrollLeft;
+		const viewRight = viewLeft + view;
+		let anchor = Math.max(0, Math.min(this.slots.length - 1, this.turnAnchor ?? this.currentPage));
+		const overlaps = (i: number) =>
+			this.slots[i].el.offsetLeft < viewRight &&
+			this.slots[i].el.offsetLeft + this.slots[i].el.offsetWidth > viewLeft;
+		// A jump (thumbnail, outline, fling across pages) left the swipe's page entirely:
+		// measure from the page now in the middle instead.
+		if (!overlaps(anchor)) {
+			const center = viewLeft + view / 2;
+			anchor = this.slots.reduce(
+				(best, slot, i) =>
+					Math.abs(slot.el.offsetLeft + slot.el.offsetWidth / 2 - center) <
+					Math.abs(this.slots[best].el.offsetLeft + this.slots[best].el.offsetWidth / 2 - center)
+						? i
+						: best,
+				0,
+			);
+		}
+		const slot = this.slots[anchor];
+		const left = slot.el.offsetLeft;
+		const right = left + slot.el.offsetWidth;
+		const threshold = Math.min(120, view * 0.15);
+		let target: number | null = null;
+		if (slot.el.offsetWidth <= view) {
+			const offset = viewLeft + view / 2 - (left + right) / 2;
+			if (offset > threshold && anchor < this.slots.length - 1) target = this.edgeScroll(anchor + 1, "start");
+			else if (offset < -threshold && anchor > 0) target = this.edgeScroll(anchor - 1, "end");
+			else if (!released) target = left - (view - slot.el.offsetWidth) / 2;
+		} else if (viewRight - right > threshold && anchor < this.slots.length - 1) {
+			target = this.edgeScroll(anchor + 1, "start");
+		} else if (left - viewLeft > threshold && anchor > 0) {
+			target = this.edgeScroll(anchor - 1, "end");
+		} else if (!released) {
+			// Spring back once momentum is over (while it runs it may still turn the page).
+			if (viewRight > right) target = right - view;
+			else if (viewLeft < left) target = left;
+		}
+		if (target === null) {
+			if (!released) this.turnAnchor = null;
+			return;
+		}
+		this.autoTurning = true;
+		this.scroller.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+	}
+
+	/** scrollLeft that shows a zoomed page from its left ("start") or right ("end") edge. */
+	private edgeScroll(index: number, edge: "start" | "end"): number {
+		const el = this.slots[index].el;
+		const view = this.scroller.clientWidth;
+		if (el.offsetWidth <= view) return el.offsetLeft - (view - el.offsetWidth) / 2;
+		return edge === "start" ? el.offsetLeft : el.offsetLeft + el.offsetWidth - view;
 	}
 
 	private centerPage(index: number): void {
